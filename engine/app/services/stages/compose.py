@@ -118,11 +118,16 @@ def _ensure_gsap(cache_dir: Path, assets_dir: Path) -> None:
     shutil.copyfile(cached, target)
 
 
-def render_video(compose_dir: Path, out_path: Path, quality: str) -> None:
-    npx = shutil.which("npx")
-    if npx is None:
-        raise StageError("npx not found; install Node.js 22+ to render compositions")
-    cmd = ["npx", "--yes", "hyperframes", "render", "--quality", quality, "--output", str(out_path)]
+def render_video(compose_dir: Path, out_path: Path, quality: str, runner: str) -> None:
+    runner = runner if runner in ("npx", "bunx") else "npx"
+    executable = shutil.which(runner)
+    if executable is None:
+        raise StageError(
+            f"'{runner}' not found on PATH; install Node.js 22+ (npx) or Bun 1.4+ (bunx)"
+        )
+    cmd = [runner, "--yes", "hyperframes", "render", "--quality", quality, "--output", str(out_path)]
+    if runner == "bunx":
+        cmd = ["bunx", "hyperframes", "render", "--quality", quality, "--output", str(out_path)]
     if os.name == "nt":
         cmd = ["cmd", "/c"] + cmd
     try:
@@ -162,4 +167,6 @@ async def run(ctx: dict) -> None:
 
     out_path = directory / "output" / "video.mp4"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.to_thread(render_video, compose_dir, out_path, settings.compose_quality)
+    await asyncio.to_thread(
+        render_video, compose_dir, out_path, settings.compose_quality, settings.render_runner
+    )

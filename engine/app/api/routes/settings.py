@@ -13,6 +13,7 @@ class SettingsUpdate(BaseModel):
     llm_model: str | None = None
     llm_api_key: str | None = None
     compose_quality: str | None = None
+    render_runner: str | None = None
 
 
 def _public(settings) -> dict:
@@ -21,6 +22,7 @@ def _public(settings) -> dict:
         "llm_model": settings.llm_model,
         "llm_api_key_set": bool(settings.llm_api_key),
         "compose_quality": settings.compose_quality,
+        "render_runner": settings.render_runner,
     }
 
 

@@ -49,8 +49,10 @@ to MP4 by [HyperFrames](https://hyperframes.heygen.com).
 
 ## Requirements
 
-- Python 3.12 or newer
-- Node.js 22 or newer (rendering also uses FFmpeg and a local Chrome)
+- Python 3.12 or newer (engine)
+- Bun 1.4+ (web tooling and the render runner) or Node.js 22+ (npx) - the HyperFrames CLI
+  documents Node 22+, and bunx is verified to launch it
+- FFmpeg and a local Chrome (used by the render step)
 
 ## Quick start
 
@@ -63,8 +65,8 @@ python -m venv .venv
 
 :: terminal 2 - web
 cd web
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 Open http://localhost:5173, create a job with one product photo, product details and a music track,
@@ -72,11 +74,16 @@ then follow the stages until the video player appears.
 
 ## Configuration
 
-Set through the Settings screen or environment variables (prefix `ULASAPP_`):
+Settings live as JSON overrides in the data directory and are edited on the Settings screen;
+environment variables (prefix `ULASAPP_`) are an override layer for advanced setups:
 
 - `ULASAPP_DATA_DIR` - data directory (default `%USERPROFILE%\.ulasapp`)
 - `ULASAPP_LLM_BASE_URL`, `ULASAPP_LLM_API_KEY`, `ULASAPP_LLM_MODEL` - any OpenAI-compatible endpoint
 - `ULASAPP_COMPOSE_QUALITY` - HyperFrames render quality (`draft`, `looks`, `delivery`)
+- `ULASAPP_RENDER_RUNNER` - `npx` (default, Node 22+) or `bunx` (Bun 1.4+)
+
+When the desktop shell lands, the API key is planned to move to OS-protected storage (Windows
+Credential Manager) managed by the shell; the engine keeps reading it through the same settings.
 
 ## Roadmap
 
