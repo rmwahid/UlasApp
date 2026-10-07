@@ -68,7 +68,7 @@ def test_stages_produce_artifacts(tmp_path, monkeypatch):
     async def fake_llm(system, user):
         return FAKE_SCRIPT
 
-    def fake_render(compose_dir, out_path, quality):
+    def fake_render(compose_dir, out_path, quality, runner):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"fake-video-bytes")
 
