@@ -1,21 +1,99 @@
 # UlasApp
 
-AI product-review video generator: upload product photos and/or self-recorded product footage,
-clone your own voice from a short sample, and get a UGC-style product review video with your voice.
+Turn one product photo into a short product review video. UlasApp writes a UGC-style script with
+AI, renders on-screen text cards over your product shot, adds your music, and exports a vertical
+video - all generated locally by a small pipeline engine, driven from a web wizard.
 
-Status: Phase 1 (walking skeleton) scaffold in progress. Local pipeline engine (FastAPI + SQLModel +
-SQLite) and web wizard (Svelte + Vite); desktop shell is completed later in this phase.
+> **Status:** early development. This repository is private while the core is being designed and
+> will be published as open source once the first milestone is complete.
 
-Planned architecture (see the project AGENTS.md for the full decision record):
+## Features
 
-- Web-based UI wrapped in Tauri 2 (same UI also runs in a browser)
-- Rust core for job orchestration (SQLite queue, settings, sidecar lifecycle)
-- Python sidecar engine (local FastAPI) with a stage pipeline:
-  script -> voice (swappable provider adapters) -> visual -> compose -> qa
-- HyperFrames as the primary composition renderer
-- Heavy AI inference dispatchable to cloud providers; local composition works on low-spec machines
+**Current**
+
+- One photo to a 9:16 review video: AI script in casual Bahasa Indonesia with UGC structure
+  (hook / problem / solution / proof / CTA), on-screen text cards, background music
+- Local pipeline engine: resumable stages (script, visual, compose, QA) over a per-project state
+  file, job queue on SQLite, live progress streamed to the UI over SSE
+- Web wizard: create a job from one photo, product details and a music track, watch each stage
+  finish, play the rendered result
+- Settings screen for any OpenAI-compatible LLM endpoint and for render quality
+
+**Planned**
+
+- Voice cloning so videos are narrated in your own voice, with per-line delivery control
+- Multiple photos and self-recorded clips with automatic shot ordering and a storyboard editor
+- Aspect presets (9:16, 16:9, 1:1, 4:5), a zoomable multi-track timeline, brand kits
+- Desktop shell, MCP server and agent skill, batch runs
+
+## How it works
+
+```
+web wizard (Svelte)
+      |  HTTP + SSE
+      v
+engine (FastAPI on 127.0.0.1)
+      |  job queue (SQLite), per-project state file
+      v
+stages: 1. script (LLM)  ->  2. visual (asset plan)  ->  3. compose (HyperFrames render)  ->  4. QA
+```
+
+Every stage writes a JSON artifact plus its status into the project folder. A job therefore resumes
+where it stopped, and each step can be inspected on disk. Compositions are plain HTML/CSS rendered
+to MP4 by [HyperFrames](https://hyperframes.heygen.com).
+
+## Project layout
+
+- `engine/` - FastAPI + SQLModel + SQLite service: job queue, pipeline stages, sidecar entrypoint
+- `web/` - Svelte + Vite wizard UI
+
+## Requirements
+
+- Python 3.12 or newer
+- Node.js 22 or newer (rendering also uses FFmpeg and a local Chrome)
+
+## Quick start
+
+```bat
+:: terminal 1 - engine
+cd engine
+python -m venv .venv
+.venv\Scripts\pip install "fastapi[standard]" sqlmodel pydantic-settings httpx python-multipart
+.venv\Scripts\python -m app.sidecar --port 8765
+
+:: terminal 2 - web
+cd web
+npm install
+npm run dev
+```
+
+Open http://localhost:5173, create a job with one product photo, product details and a music track,
+then follow the stages until the video player appears.
+
+## Configuration
+
+Set through the Settings screen or environment variables (prefix `ULASAPP_`):
+
+- `ULASAPP_DATA_DIR` - data directory (default `%USERPROFILE%\.ulasapp`)
+- `ULASAPP_LLM_BASE_URL`, `ULASAPP_LLM_API_KEY`, `ULASAPP_LLM_MODEL` - any OpenAI-compatible endpoint
+- `ULASAPP_COMPOSE_QUALITY` - HyperFrames render quality (`draft`, `looks`, `delivery`)
+
+## Roadmap
+
+1. Walking skeleton: one photo to a text + music 9:16 video (this milestone)
+2. Real material: multiple photos and clips, automatic shot ordering, storyboard review
+3. Own voice: voice cloning through a cloud provider, per-line script editing and re-synthesis
+4. Output variants: aspect presets, live composition preview
+5. Polish and fix-it tools: delivery editor, brand kit, BGM ducking, zoomable timeline
+6. Voice everywhere: local voice model; optional cloud avatar
+7. Distribution and automation: MCP server, agent skill, CLI, publishing, batch runs
+8. Productization: installer, i18n, template marketplace
+
+## Contributing
+
+The project is in early private development. Contribution guidelines will be published together
+with the first public release.
 
 ## License
 
-To be finalized before first release. Third-party license obligations are tracked in
-THIRD-PARTY-NOTICES when applicable.
+A license will be added before the first public release.
