@@ -3,7 +3,8 @@
 AI product-review video generator: upload product photos and/or self-recorded product footage,
 clone your own voice from a short sample, and get a UGC-style product review video with your voice.
 
-Status: planning and scaffolding phase. No application code yet.
+Status: Phase 1 (walking skeleton) scaffold in progress. Local pipeline engine (FastAPI + SQLModel +
+SQLite) and web wizard (Svelte + Vite); desktop shell is completed later in this phase.
 
 Planned architecture (see the project AGENTS.md for the full decision record):
 
@@ -16,3 +17,5 @@ Planned architecture (see the project AGENTS.md for the full decision record):
 
 ## License
 
+To be finalized before first release. Third-party license obligations are tracked in
+THIRD-PARTY-NOTICES when applicable.
