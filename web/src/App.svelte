@@ -7,9 +7,30 @@
   let view = "new";
   let jobId = null;
 
+  function applyHash() {
+    const hash = window.location.hash;
+    const match = hash.match(/^#\/job\/([a-z0-9]+)/i);
+    if (match) {
+      jobId = match[1];
+      view = "job";
+    } else if (hash === "#/jobs") {
+      view = "jobs";
+    } else if (hash === "#/settings") {
+      view = "settings";
+    } else {
+      view = "new";
+    }
+  }
+  applyHash();
+  window.addEventListener("hashchange", applyHash);
+
   function openJob(id) {
-    jobId = id;
-    view = "job";
+    window.location.hash = `#/job/${id}`;
+  }
+
+  function setView(name) {
+    window.location.hash = name === "new" ? "" : `#/${name}`;
+    if (name === "new") applyHash();
   }
 </script>
 
@@ -17,9 +38,9 @@
   <header>
     <h1>UlasApp</h1>
     <nav>
-      <button class:active={view === "new"} on:click={() => (view = "new")}>New video</button>
-      <button class:active={view === "jobs"} on:click={() => (view = "jobs")}>Jobs</button>
-      <button class:active={view === "settings"} on:click={() => (view = "settings")}>
+      <button class:active={view === "new"} on:click={() => setView("new")}>New video</button>
+      <button class:active={view === "jobs"} on:click={() => setView("jobs")}>Jobs</button>
+      <button class:active={view === "settings"} on:click={() => setView("settings")}>
         Settings
       </button>
     </nav>

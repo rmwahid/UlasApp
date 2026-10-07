@@ -59,10 +59,11 @@ async def create_job(
         )
         inputs["music"] = f"assets/music{music_ext}"
     job = Job(id=job_id, title=title, project_dir=str(directory))
+    aspect, mode = job.aspect, job.mode
     with Session(engine) as session:
         session.add(job)
         session.commit()
-    write_state(directory, initial_state(job_id, title, job.aspect, job.mode, inputs))
+    write_state(directory, initial_state(job_id, title, aspect, mode, inputs))
     pipeline.enqueue(job_id)
     return {"id": job_id, "title": title}
 
