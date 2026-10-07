@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # HyperFrames composition render
     compose_quality: str = "looks"
     render_runner: str = "npx"  # "npx" (Node 22+) or "bunx" (Bun 1.4+)
+    ffmpeg_dir: str = ""  # optional explicit FFmpeg bin dir; auto-detected when empty
 
 
 def _overrides_path(data_dir: Path) -> Path:

@@ -21,16 +21,21 @@ TEMPLATE = """<!doctype html>
       body { margin: 0; background: #0b0f14; font-family: system-ui, sans-serif; }
       #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: #0b0f14; }
       .clip { position: absolute; inset: 0; display: grid; place-items: center; }
+      .card-clip { display: flex; align-items: flex-end; justify-content: center;
+                   padding-bottom: 5%; }
       .photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-      .scrim { position: absolute; inset: 0;
-               background: linear-gradient(180deg, rgba(8,10,14,.3) 0%, rgba(8,10,14,.8) 100%); }
-      .card { position: relative; width: 82%; padding: 44px 52px; border-radius: 28px;
-              background: rgba(12,16,22,.74); box-shadow: 0 24px 80px rgba(0,0,0,.45); }
-      .section-tag { font-size: 32px; letter-spacing: .18em; text-transform: uppercase;
-                     color: #7fd4c1; margin: 0 0 16px; }
-      .line-text { font-size: 72px; line-height: 1.25; font-weight: 700; color: #f4f7fb; margin: 0; }
-      .overlay-chip { display: inline-block; margin: 26px 0 0; padding: 14px 32px; border-radius: 999px;
-                      background: #f5b52e; color: #14181f; font-size: 52px; font-weight: 800; }
+      .shade { position: absolute; left: 0; right: 0; bottom: 0; height: 46%;
+               background: linear-gradient(180deg, rgba(8,10,14,0) 0%, rgba(8,10,14,.86) 80%); }
+      .card { width: 90%; padding: 34px 42px; border-radius: 24px;
+              background: rgba(10,13,18,.72); backdrop-filter: blur(10px);
+              border: 1px solid rgba(255,255,255,.08); box-shadow: 0 18px 60px rgba(0,0,0,.5); }
+      .section-tag { font-size: 26px; letter-spacing: .18em; text-transform: uppercase;
+                     color: #7fd4c1; margin: 0 0 12px; }
+      .line-text { font-size: 60px; line-height: 1.28; font-weight: 700; color: #f4f7fb;
+                   margin: 0; text-shadow: 0 2px 8px rgba(0,0,0,.4); }
+      .overlay-chip { display: inline-block; margin: 22px 0 0; padding: 12px 30px;
+                      border-radius: 999px; background: #f5b52e; color: #14181f;
+                      font-size: 44px; font-weight: 800; }
     </style>
   </head>
   <body>
@@ -38,7 +43,7 @@ TEMPLATE = """<!doctype html>
          data-height="@@HEIGHT@@" data-duration="@@TOTAL@@">
       <section id="photo-bg" class="clip" data-start="0" data-duration="@@TOTAL@@">
         <img class="photo" src="@@PHOTO@@" alt="" />
-        <div class="scrim"></div>
+        <div class="shade"></div>
       </section>
 @@CARDS@@
 @@MUSIC@@
@@ -68,7 +73,7 @@ def _build_html(timeline: dict, photo_src: str, music_src: str | None, title: st
                 f'        <p class="overlay-chip">{html.escape(str(line["overlay"]))}</p>\n'
             )
         cards.append(
-            f'      <section id="card-{lid}" class="clip" data-start="{line["start"]}" '
+            f'      <section id="card-{lid}" class="clip card-clip" data-start="{line["start"]}" '
             f'data-duration="{duration}">\n'
             f'        <div class="card">\n'
             f'          <p class="section-tag">{html.escape(str(line["section"]))}</p>\n'

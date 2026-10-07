@@ -8,11 +8,13 @@ from fastapi.staticfiles import StaticFiles
 from app.api.main import api_router
 from app.core.config import get_settings
 from app.core.db import init_db
+from app.core.ffmpeg import ensure_ffmpeg_on_path
 from app.services.pipeline import start_worker, stop_worker
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    ensure_ffmpeg_on_path()
     init_db()
     start_worker()
     yield
