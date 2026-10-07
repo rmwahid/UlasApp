@@ -15,7 +15,7 @@ video - all generated locally by a small pipeline engine, driven from a web wiza
   (hook / problem / solution / proof / CTA), on-screen text cards, background music
 - Local pipeline engine: resumable stages (script, visual, compose, QA) over a per-project state
   file, job queue on SQLite, live progress streamed to the UI over SSE
-- Web wizard: create a job from one photo, product details and a music track, watch each stage
+- Web wizard: create a job from one photo, product details and optional music, watch each stage
   finish, play the rendered result
 - Settings screen for any OpenAI-compatible LLM endpoint and for render quality
 

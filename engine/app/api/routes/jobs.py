@@ -40,28 +40,29 @@ async def create_job(
     price: str = Form(default=""),
     points: str = Form(default=""),
     photo: UploadFile = File(...),
-    music: UploadFile = File(...),
+    music: UploadFile | None = File(None),
 ) -> dict:
     settings = get_settings()
     job_id = _new_id()
     directory = project_dir(settings.data_dir, job_id)
     photo_ext = Path(photo.filename or "photo.jpg").suffix.lower() or ".jpg"
-    music_ext = Path(music.filename or "music.mp3").suffix.lower() or ".mp3"
     await asyncio.to_thread(
         _save_upload, photo, directory / "assets" / f"photo{photo_ext}"
     )
-    await asyncio.to_thread(
-        _save_upload, music, directory / "assets" / f"music{music_ext}"
-    )
+    inputs = {
+        "photo": f"assets/photo{photo_ext}",
+        "product": {"name": product_name, "price": price, "points": points},
+    }
+    if music is not None and music.filename:
+        music_ext = Path(music.filename).suffix.lower() or ".mp3"
+        await asyncio.to_thread(
+            _save_upload, music, directory / "assets" / f"music{music_ext}"
+        )
+        inputs["music"] = f"assets/music{music_ext}"
     job = Job(id=job_id, title=title, project_dir=str(directory))
     with Session(engine) as session:
         session.add(job)
         session.commit()
-    inputs = {
-        "photo": f"assets/photo{photo_ext}",
-        "music": f"assets/music{music_ext}",
-        "product": {"name": product_name, "price": price, "points": points},
-    }
     write_state(directory, initial_state(job_id, title, job.aspect, job.mode, inputs))
     pipeline.enqueue(job_id)
     return {"id": job_id, "title": title}
