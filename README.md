@@ -46,6 +46,8 @@ to MP4 by [HyperFrames](https://hyperframes.heygen.com).
 
 - `engine/` - FastAPI + SQLModel + SQLite service: job queue, pipeline stages, sidecar entrypoint
 - `web/` - Svelte + Vite wizard UI
+- `src-tauri/` - desktop shell (Rust + WebView2): runs the engine as a child process, reads its
+  port handshake, and hosts the UI in a native window
 
 ## Requirements
 
@@ -53,6 +55,7 @@ to MP4 by [HyperFrames](https://hyperframes.heygen.com).
 - Bun 1.4+ (web tooling and the render runner) or Node.js 22+ (npx) - the HyperFrames CLI
   documents Node 22+, and bunx is verified to launch it
 - FFmpeg and a local Chrome (used by the render step)
+- Rust toolchain (MSVC) - only for building the desktop shell
 
 ## Quick start
 
