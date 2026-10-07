@@ -46,7 +46,7 @@ def _make_project(tmp_path: Path):
         {
             "photo": "assets/photo.jpg",
             "music": "assets/music.mp3",
-            "product": {"name": "Watch X", "price": "Rp 299.000", "points": "light, accurate"},
+            "product": {"name": "Watch X", "points": "light, accurate, Rp 299.000"},
         },
     )
     write_state(directory, state)

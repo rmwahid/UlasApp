@@ -37,7 +37,6 @@ def _get_job(job_id: str) -> Job:
 async def create_job(
     title: str = Form(...),
     product_name: str = Form(...),
-    price: str = Form(default=""),
     points: str = Form(default=""),
     photo: UploadFile = File(...),
     music: UploadFile | None = File(None),
@@ -51,7 +50,7 @@ async def create_job(
     )
     inputs = {
         "photo": f"assets/photo{photo_ext}",
-        "product": {"name": product_name, "price": price, "points": points},
+        "product": {"name": product_name, "points": points},
     }
     if music is not None and music.filename:
         music_ext = Path(music.filename).suffix.lower() or ".mp3"

@@ -1,9 +1,7 @@
 <script>
   export let onCreated = () => {};
 
-  let title = "";
   let productName = "";
-  let price = "";
   let points = "";
   let photo = null;
   let photoUrl = "";
@@ -34,9 +32,8 @@
     error = "";
     try {
       const form = new FormData();
-      form.set("title", title || productName);
+      form.set("title", productName);
       form.set("product_name", productName);
-      form.set("price", price);
       form.set("points", points);
       form.set("photo", photo);
       if (music) form.set("music", music);
@@ -90,27 +87,17 @@
   </div>
 
   <form on:submit|preventDefault={submit}>
-    <div class="grid">
-      <label>
-        Product name
-        <input bind:value={productName} required placeholder="e.g. Watch X" />
-      </label>
-      <label>
-        Price
-        <input bind:value={price} placeholder="e.g. Rp 299.000" />
-      </label>
-    </div>
+    <label>
+      Product name
+      <input bind:value={productName} required placeholder="e.g. Watch X" />
+    </label>
     <label>
       Key points
       <textarea
         bind:value={points}
         rows="4"
-        placeholder="What you like, what could be better, who it is for"
+        placeholder="What you like, what could be better, the price, who it is for"
       ></textarea>
-    </label>
-    <label>
-      Job title (optional)
-      <input bind:value={title} placeholder="Defaults to the product name" />
     </label>
     <button type="submit" disabled={busy || !photo}>
       {busy ? "Starting..." : "Generate video"}
@@ -220,11 +207,6 @@
   }
   form {
     display: grid;
-    gap: 12px;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
     gap: 12px;
   }
   label {

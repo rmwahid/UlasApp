@@ -15,7 +15,6 @@ SYSTEM_PROMPT = (
 USER_PROMPT_TEMPLATE = """Tulis script review produk UGC berdasarkan data berikut.
 
 Nama produk: {name}
-Harga: {price}
 Poin penting: {points}
 
 Aturan:
@@ -78,7 +77,6 @@ async def run(ctx: dict) -> None:
     product = state["inputs"].get("product", {})
     prompt = USER_PROMPT_TEMPLATE.format(
         name=product.get("name") or ctx.get("title", "the product"),
-        price=product.get("price") or "not mentioned",
         points=product.get("points") or "not provided",
     )
     try:
