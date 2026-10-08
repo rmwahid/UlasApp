@@ -1,36 +1,40 @@
 <script>
-  import JobDetail from "./components/JobDetail.svelte";
-  import JobList from "./components/JobList.svelte";
-  import NewJob from "./components/NewJob.svelte";
+  import ProjectCreate from "./components/ProjectCreate.svelte";
+  import ProjectDetail from "./components/ProjectDetail.svelte";
+  import Projects from "./components/Projects.svelte";
   import Settings from "./components/Settings.svelte";
 
-  let view = "new";
-  let jobId = null;
+  let view = "projects";
+  let projectId = null;
 
   function applyHash() {
     const hash = window.location.hash;
-    const match = hash.match(/^#\/job\/([a-z0-9]+)/i);
+    const match = hash.match(/^#\/project\/([a-z0-9]+)/i);
     if (match) {
-      jobId = match[1];
-      view = "job";
-    } else if (hash === "#/jobs") {
-      view = "jobs";
+      projectId = match[1];
+      view = "project";
+    } else if (hash === "#/new") {
+      view = "new";
     } else if (hash === "#/settings") {
       view = "settings";
     } else {
-      view = "new";
+      view = "projects";
     }
   }
   applyHash();
   window.addEventListener("hashchange", applyHash);
 
-  function openJob(id) {
-    window.location.hash = `#/job/${id}`;
+  function openProject(id) {
+    window.location.hash = `#/project/${id}`;
+  }
+
+  function newProject() {
+    window.location.hash = "#/new";
   }
 
   function setView(name) {
-    window.location.hash = name === "new" ? "" : `#/${name}`;
-    if (name === "new") applyHash();
+    window.location.hash = `#/${name}`;
+    applyHash();
   }
 </script>
 
@@ -38,22 +42,21 @@
   <header>
     <h1>UlasApp</h1>
     <nav>
-      <button class:active={view === "new"} on:click={() => setView("new")}>New video</button>
-      <button class:active={view === "jobs"} on:click={() => setView("jobs")}>Jobs</button>
-      <button class:active={view === "settings"} on:click={() => setView("settings")}>
-        Settings
+      <button class:active={view !== "settings"} on:click={() => setView("projects")}>
+        Projects
       </button>
+      <button class:active={view === "settings"} on:click={() => setView("settings")}>Settings</button>
     </nav>
   </header>
 
   {#if view === "new"}
-    <NewJob onCreated={openJob} />
-  {:else if view === "jobs"}
-    <JobList onOpen={openJob} />
-  {:else if view === "job"}
-    <JobDetail id={jobId} />
-  {:else}
+    <ProjectCreate onCreated={openProject} />
+  {:else if view === "project"}
+    <ProjectDetail id={projectId} />
+  {:else if view === "settings"}
     <Settings />
+  {:else}
+    <Projects onOpen={openProject} onNew={newProject} />
   {/if}
 </main>
 
@@ -65,7 +68,7 @@
     font-family: system-ui, sans-serif;
   }
   main {
-    max-width: 760px;
+    max-width: 880px;
     margin: 0 auto;
     padding: 24px 16px 64px;
   }

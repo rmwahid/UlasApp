@@ -201,8 +201,7 @@
   .set {
     color: #7fd4c1;
   }
-  input,
-  textarea {
+  input {
     background: #0e1116;
     color: #e8ecf1;
     border: 1px solid #2a323d;

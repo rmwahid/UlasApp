@@ -18,7 +18,7 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 struct EngineProcess(Mutex<Option<Child>>);
 
 fn engine_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../engine")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../backend")
 }
 
 fn engine_ready() -> bool {
@@ -132,7 +132,7 @@ fn main() {
     }
     if !engine_ready() {
         eprintln!(
-            "the engine virtual environment is missing; create it first (see engine/README.md)"
+            "the engine virtual environment is missing; create it first (see backend/README.md)"
         );
         std::process::exit(1);
     }

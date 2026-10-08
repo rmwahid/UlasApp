@@ -1,20 +1,135 @@
 <script>
+  import { onDestroy } from "svelte";
+
   export let onCreated = () => {};
+
+  const MAX_ASSETS = 20;
 
   let productName = "";
   let points = "";
-  let photo = null;
-  let photoUrl = "";
+  let direction = "";
+  let overlayStyle = "";
+  let material = [];
   let music = null;
   let musicName = "";
   let busy = false;
   let error = "";
+  let nextId = 1;
+  let dragIndex = null;
+  let overIndex = null;
+  let fileDrag = false;
 
-  function pickPhoto(event) {
-    const file = event.target.files[0] || null;
-    if (photoUrl) URL.revokeObjectURL(photoUrl);
-    photo = file;
-    photoUrl = photo ? URL.createObjectURL(photo) : "";
+  function kindOf(file) {
+    if (file.type.startsWith("image/")) return "photo";
+    if (file.type.startsWith("video/")) return "clip";
+    const name = file.name.toLowerCase();
+    if (/\.(jpe?g|png|webp)$/.test(name)) return "photo";
+    if (/\.(mp4|mov|m4v|webm|mkv)$/.test(name)) return "clip";
+    return null;
+  }
+
+  function addFiles(fileList) {
+    const incoming = Array.from(fileList || []);
+    if (!incoming.length) return;
+    const kept = [];
+    let message = "";
+    for (const file of incoming) {
+      if (material.length + kept.length >= MAX_ASSETS) {
+        message = `At most ${MAX_ASSETS} files per project.`;
+        break;
+      }
+      const kind = kindOf(file);
+      if (!kind) {
+        message = `${file.name} is neither a photo nor a clip.`;
+        continue;
+      }
+      kept.push({
+        id: nextId++,
+        file,
+        kind,
+        url: URL.createObjectURL(file),
+        hero: false,
+      });
+    }
+    if (kept.length && !material.some((item) => item.hero)) {
+      kept[0] = { ...kept[0], hero: true };
+    }
+    material = [...material, ...kept];
+    error = message;
+  }
+
+  function pickFiles(event) {
+    addFiles(event.target.files);
+    event.target.value = "";
+  }
+
+  function markHero(id) {
+    material = material.map((item) => ({ ...item, hero: item.id === id }));
+  }
+
+  function removeItem(id) {
+    const item = material.find((entry) => entry.id === id);
+    if (item) URL.revokeObjectURL(item.url);
+    let kept = material.filter((entry) => entry.id !== id);
+    if (kept.length && !kept.some((entry) => entry.hero)) {
+      kept = kept.map((entry, index) => (index === 0 ? { ...entry, hero: true } : entry));
+    }
+    material = kept;
+  }
+
+  function startReorder(event, index) {
+    dragIndex = index;
+    overIndex = index;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+  }
+
+  function overItem(event, index) {
+    if (dragIndex === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    overIndex = index;
+  }
+
+  function dropOnItem(event, index) {
+    if (dragIndex === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const next = [...material];
+    const [moved] = next.splice(dragIndex, 1);
+    next.splice(index, 0, moved);
+    material = next;
+    dragIndex = null;
+    overIndex = null;
+  }
+
+  function endReorder() {
+    dragIndex = null;
+    overIndex = null;
+  }
+
+  function overZone(event) {
+    const types = event.dataTransfer ? Array.from(event.dataTransfer.types) : [];
+    if (types.includes("Files")) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      fileDrag = true;
+    } else if (dragIndex !== null) {
+      event.preventDefault();
+    }
+  }
+
+  function dropOnZone(event) {
+    fileDrag = false;
+    if (dragIndex !== null || !event.dataTransfer) return;
+    if (Array.from(event.dataTransfer.types).includes("Files")) {
+      event.preventDefault();
+      addFiles(event.dataTransfer.files);
+    }
+  }
+
+  function leaveZone(event) {
+    if (event.target === event.currentTarget) fileDrag = false;
   }
 
   function pickMusic(event) {
@@ -32,10 +147,13 @@
     error = "";
     try {
       const form = new FormData();
-      form.set("title", productName);
       form.set("product_name", productName);
       form.set("points", points);
-      form.set("photo", photo);
+      form.set("direction", direction);
+      form.set("overlay_style", overlayStyle);
+      for (const item of material) form.append("assets", item.file, item.file.name);
+      const hero = material.findIndex((item) => item.hero);
+      form.set("hero", String(hero < 0 ? 0 : hero));
       if (music) form.set("music", music);
       const response = await fetch("/api/jobs", { method: "POST", body: form });
       if (!response.ok) {
@@ -50,41 +168,89 @@
       busy = false;
     }
   }
+
+  onDestroy(() => {
+    for (const item of material) URL.revokeObjectURL(item.url);
+  });
 </script>
 
 <section>
-  <h2>New review video</h2>
+  <h2>New project</h2>
   <p class="hint">
-    One product photo in, a vertical text + music review video out. Music is optional.
+    Pick all the photos and clips for this product, drag them into the order you want, and mark the
+    one to open with. Nothing renders yet: after this you check the descriptions the vision model
+    wrote, then fill in the brief, then generate.
   </p>
 
-  <div class="uploads">
-    <label class="drop photo-drop" class:filled={photo}>
-      <input type="file" accept="image/*" on:change={pickPhoto} />
-      {#if photoUrl}
-        <img src={photoUrl} alt="Product preview" />
-        <div class="meta">
-          <span class="name">{photo.name}</span>
-          <span class="size">{formatSize(photo.size)}</span>
-        </div>
-      {:else}
-        <span class="emoji">🖼️</span>
-        <span class="label">Product photo</span>
-        <span class="sub">click to choose - it becomes the video background</span>
-      {/if}
+  <div
+    class="zone"
+    class:file-drag={fileDrag}
+    role="group"
+    aria-label="Product material"
+    on:dragover={overZone}
+    on:dragleave={leaveZone}
+    on:drop={dropOnZone}
+  >
+    <label class="drop">
+      <input type="file" accept="image/*,video/*" multiple on:change={pickFiles} />
+      <span class="emoji">📷</span>
+      <span class="label">Add photos and clips</span>
+      <span class="sub">click to choose, or drop files here</span>
     </label>
 
-    <label class="drop" class:filled={music}>
-      <input type="file" accept="audio/*" on:change={pickMusic} />
-      <span class="emoji">🎵</span>
-      <span class="label">Music <em>optional</em></span>
-      {#if musicName}
-        <span class="sub">{musicName}</span>
-      {:else}
-        <span class="sub">silent video when skipped</span>
-      {/if}
-    </label>
+    {#if material.length}
+      <ol class="material">
+        {#each material as item, index (item.id)}
+          <li
+            class="tile"
+            class:over={overIndex === index && dragIndex !== null}
+            class:hero={item.hero}
+            draggable="true"
+            on:dragstart={(event) => startReorder(event, index)}
+            on:dragover={(event) => overItem(event, index)}
+            on:drop={(event) => dropOnItem(event, index)}
+            on:dragend={endReorder}
+          >
+            <span class="order">{index + 1}</span>
+            {#if item.kind === "photo"}
+              <img src={item.url} alt={item.file.name} />
+            {:else}
+              <video src={item.url} muted playsinline preload="metadata"></video>
+            {/if}
+            <span class="badge">{item.kind}</span>
+            <div class="tile-meta">
+              <span class="name" title={item.file.name}>{item.file.name}</span>
+              <span class="size">{formatSize(item.file.size)}</span>
+            </div>
+            <div class="tile-actions">
+              <button
+                type="button"
+                class="star"
+                class:on={item.hero}
+                title={item.hero ? "Opens the video" : "Open the video with this one"}
+                on:click={() => markHero(item.id)}
+              >
+                ★
+              </button>
+              <button type="button" class="remove" title="Remove" on:click={() => removeItem(item.id)}>
+                ✕
+              </button>
+            </div>
+          </li>
+        {/each}
+      </ol>
+      <p class="order-hint">
+        {material.length} file{material.length === 1 ? "" : "s"} - dragged order is the priority,
+        the starred one opens the hook
+      </p>
+    {/if}
   </div>
+
+  <label class="music">
+    <input type="file" accept="audio/*" on:change={pickMusic} />
+    <span>🎵 Music</span>
+    <span class="music-name">{musicName || "optional - silent video when skipped"}</span>
+  </label>
 
   <form on:submit|preventDefault={submit}>
     <label>
@@ -99,8 +265,31 @@
         placeholder="What you like, what could be better, the price, who it is for"
       ></textarea>
     </label>
-    <button type="submit" disabled={busy || !photo}>
-      {busy ? "Starting..." : "Generate video"}
+    <fieldset>
+      <legend>Video brief</legend>
+      <p class="hint">
+        Your direction for the video itself, separate from what the material shows: the story, the
+        pacing, the effects, how the on-screen text should read.
+      </p>
+      <label>
+        Creative direction
+        <textarea
+          bind:value={direction}
+          rows="3"
+          placeholder="e.g. start with the watch on my wrist, keep it quick and casual, show it gets wet and still works"
+        ></textarea>
+      </label>
+      <label>
+        On-screen text style
+        <textarea
+          bind:value={overlayStyle}
+          rows="2"
+          placeholder="e.g. short uppercase lines, price always visible, no emoji"
+        ></textarea>
+      </label>
+    </fieldset>
+    <button type="submit" disabled={busy || !material.length || !productName.trim()}>
+      {busy ? "Creating..." : "Create project"}
     </button>
     {#if error}<p class="error">{error}</p>{/if}
   </form>
@@ -120,13 +309,29 @@
   .hint {
     color: #93a1b3;
     font-size: 13px;
-    margin: 0 0 18px;
   }
-  .uploads {
+  fieldset {
     display: grid;
-    grid-template-columns: 1.2fr 1fr;
-    gap: 12px;
+    gap: 10px;
+    border: 1px solid #2a323d;
+    border-radius: 10px;
+    padding: 14px;
+  }
+  legend {
+    padding: 0 6px;
+    color: #b7c2cf;
+    font-size: 13px;
+  }
+  .zone {
+    border: 1.5px dashed #3a4450;
+    border-radius: 12px;
+    padding: 12px;
     margin-bottom: 16px;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .zone.file-drag {
+    border-color: #f5b52e;
+    background: #171d26;
   }
   .drop {
     position: relative;
@@ -135,22 +340,14 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: 150px;
+    min-height: 120px;
     padding: 14px;
-    border: 1.5px dashed #3a4450;
-    border-radius: 12px;
+    border-radius: 10px;
     cursor: pointer;
     text-align: center;
-    overflow: hidden;
-    transition: border-color 0.15s ease, background 0.15s ease;
   }
   .drop:hover {
-    border-color: #f5b52e;
     background: #171d26;
-  }
-  .drop.filled {
-    border-style: solid;
-    border-color: #2f9e6e;
   }
   .drop input {
     position: absolute;
@@ -159,51 +356,154 @@
     cursor: pointer;
   }
   .drop .emoji {
-    font-size: 28px;
+    font-size: 26px;
   }
   .drop .label {
     font-size: 14px;
     font-weight: 600;
   }
-  .drop .label em {
-    color: #f5b52e;
-    font-style: normal;
-    font-size: 11px;
-    margin-left: 4px;
-  }
-  .drop .sub {
+  .drop .sub,
+  .order-hint {
     font-size: 12px;
     color: #93a1b3;
   }
-  .photo-drop img {
-    position: absolute;
-    inset: 0;
+  .material {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    gap: 10px;
+    margin: 0 0 10px;
+    padding: 0;
+  }
+  .tile {
+    position: relative;
+    aspect-ratio: 3 / 4;
+    border: 1px solid #2a323d;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #0e1116;
+    cursor: grab;
+  }
+  .tile.hero {
+    border-color: #2f9e6e;
+  }
+  .tile.over {
+    border-color: #f5b52e;
+    transform: translateY(-2px);
+  }
+  .tile img,
+  .tile video {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    display: block;
   }
-  .photo-drop .meta {
+  .order {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    min-width: 20px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(8, 10, 14, 0.78);
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+  }
+  .badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(8, 10, 14, 0.78);
+    color: #b7c2cf;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .tile-meta {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
     display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 8px 12px;
-    background: rgba(8, 10, 14, 0.72);
-    font-size: 12px;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    background: rgba(8, 10, 14, 0.78);
+    font-size: 11px;
   }
-  .photo-drop.filled:hover .meta {
-    background: rgba(8, 10, 14, 0.85);
-  }
-  .meta .name {
+  .tile-meta .name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .meta .size {
+  .tile-meta .size {
     color: #93a1b3;
+  }
+  .tile-actions {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    display: flex;
+    justify-content: space-between;
+    padding: 0 6px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .tile:hover .tile-actions {
+    opacity: 1;
+  }
+  .tile-actions button {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 999px;
+    border: 1px solid #2a323d;
+    background: rgba(14, 17, 22, 0.92);
+    color: #e8ecf1;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .tile-actions .star.on {
+    background: #f5b52e;
+    border-color: #f5b52e;
+    color: #14181f;
+  }
+  .tile-actions .remove:hover {
+    border-color: #ff8f8f;
+    color: #ff8f8f;
+  }
+  .order-hint {
+    margin: 0;
+  }
+  .music {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    border: 1px solid #2a323d;
+    border-radius: 10px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .music input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .music-name {
+    color: #93a1b3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   form {
     display: grid;
