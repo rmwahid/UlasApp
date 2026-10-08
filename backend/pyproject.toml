@@ -1,0 +1,51 @@
+[project]
+name = "ulasapp-engine"
+version = "0.1.0"
+description = "Local pipeline engine for UlasApp review videos"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.115",
+    "python-multipart>=0.0.20",
+    "sqlmodel>=0.0.24",
+    "pydantic-settings>=2.4",
+    "httpx>=0.27",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# The rule set is pinned here so a ruff upgrade cannot silently change what CI enforces.
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # import sorting
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG001", # unused arguments in functions
+    "T201",   # print statements, allowed only where stdout is the contract
+]
+ignore = [
+    "B008",   # FastAPI declares dependencies and uploads as parameter defaults
+    "E501",   # layout belongs to the formatter; prompt and CSS strings cannot be split
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The sidecar handshake is a print on stdout: that is the contract with the desktop shell.
+"app/sidecar.py" = ["T201"]
+# Test doubles keep the signature of what they replace, so they do not use every argument.
+"tests/**" = ["ARG001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

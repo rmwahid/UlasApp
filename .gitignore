@@ -17,6 +17,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Security scan output
+.mimosa/
+
 # Environment and secrets
 .env
 .env.*
