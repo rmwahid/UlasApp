@@ -1,7 +1,7 @@
 <script>
   import ProjectCreate from "./components/ProjectCreate.svelte";
-  import ProjectDetail from "./components/ProjectDetail.svelte";
   import Projects from "./components/Projects.svelte";
+  import ProjectWorkspace from "./components/ProjectWorkspace.svelte";
   import Settings from "./components/Settings.svelte";
 
   let view = "projects";
@@ -38,21 +38,23 @@
   }
 </script>
 
-<main>
-  <header>
-    <h1>UlasApp</h1>
-    <nav>
-      <button class:active={view !== "settings"} on:click={() => setView("projects")}>
-        Projects
-      </button>
-      <button class:active={view === "settings"} on:click={() => setView("settings")}>Settings</button>
-    </nav>
-  </header>
+<main class:wide={view === "project"}>
+  {#if view !== "project"}
+    <header>
+      <h1>UlasApp</h1>
+      <nav>
+        <button class:active={view !== "settings"} on:click={() => setView("projects")}>
+          Projects
+        </button>
+        <button class:active={view === "settings"} on:click={() => setView("settings")}>Settings</button>
+      </nav>
+    </header>
+  {/if}
 
   {#if view === "new"}
     <ProjectCreate onCreated={openProject} />
   {:else if view === "project"}
-    <ProjectDetail id={projectId} />
+    <ProjectWorkspace id={projectId} />
   {:else if view === "settings"}
     <Settings />
   {:else}
@@ -71,6 +73,18 @@
     max-width: 880px;
     margin: 0 auto;
     padding: 24px 16px 64px;
+  }
+  main.wide {
+    max-width: none;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px 16px;
+    box-sizing: border-box;
+  }
+  main.wide > header {
+    margin-bottom: 0;
   }
   header {
     display: flex;

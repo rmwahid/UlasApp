@@ -112,12 +112,16 @@
   .meta {
     color: #93a1b3;
     font-size: 12px;
+    text-align: right;
+    min-width: 84px;
   }
   .badge {
     font-size: 12px;
     padding: 2px 10px;
     border-radius: 999px;
     background: #2a323d;
+    min-width: 62px;
+    text-align: center;
   }
   .badge.done {
     background: #2f9e6e;
@@ -132,6 +136,9 @@
   .date {
     color: #93a1b3;
     font-size: 12px;
+    min-width: 104px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
   .hint {
     color: #93a1b3;
