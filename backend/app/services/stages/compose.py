@@ -10,6 +10,7 @@ from pathlib import Path
 
 from app.core import media
 from app.core.config import get_settings
+from app.services import tones
 from app.services.shotlist import MODE_FREEZE, MODE_PHOTO
 from app.services.state import StageError, version_path
 
@@ -25,8 +26,9 @@ TEMPLATE = """<!doctype html>
     <title>@@TITLE@@</title>
     <script src="./assets/gsap.min.js"></script>
     <style>
-      body { margin: 0; background: #0b0f14; font-family: system-ui, sans-serif; }
-      #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: #0b0f14; }
+      body { margin: 0; background: @@TOK_BG@@; font-family: @@TOK_FONT@@; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden;
+              background: @@TOK_BG@@; }
       .clip { position: absolute; inset: 0; display: grid; place-items: center; }
       .media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
       .media-layer { z-index: 1; }
@@ -34,17 +36,25 @@ TEMPLATE = """<!doctype html>
       .card-clip { z-index: 20; display: flex; align-items: flex-end; justify-content: center;
                    padding-bottom: 5%; }
       .shade { position: absolute; left: 0; right: 0; bottom: 0; height: 46%;
-               background: linear-gradient(180deg, rgba(8,10,14,0) 0%, rgba(8,10,14,.86) 80%); }
-      .card { width: 90%; padding: 34px 42px; border-radius: 24px;
-              background: rgba(10,13,18,.72); backdrop-filter: blur(10px);
-              border: 1px solid rgba(255,255,255,.08); box-shadow: 0 18px 60px rgba(0,0,0,.5); }
-      .section-tag { font-size: 26px; letter-spacing: .18em; text-transform: uppercase;
-                     color: #7fd4c1; margin: 0 0 12px; }
-      .line-text { font-size: 60px; line-height: 1.28; font-weight: 700; color: #f4f7fb;
-                   margin: 0; text-shadow: 0 2px 8px rgba(0,0,0,.4); }
-      .overlay-chip { display: inline-block; margin: 22px 0 0; padding: 12px 30px;
-                      border-radius: 999px; background: #f5b52e; color: #14181f;
-                      font-size: 44px; font-weight: 800; }
+               background: @@TOK_SHADE@@; }
+      .card { width: 90%; padding: @@TOK_CARD_PADDING@@; border-radius: @@TOK_CARD_RADIUS@@;
+              background: @@TOK_CARD_BG@@; backdrop-filter: blur(@@TOK_CARD_BLUR@@);
+              border: @@TOK_CARD_BORDER@@; box-shadow: 0 18px 60px rgba(0,0,0,.5); }
+      .line-text { font-size: @@TOK_LINE_SIZE@@; line-height: 1.28;
+                   font-weight: @@TOK_LINE_WEIGHT@@; letter-spacing: @@TOK_LINE_SPACING@@;
+                   text-transform: @@TOK_LINE_CASE@@; color: @@TOK_INK@@; margin: 0;
+                   text-shadow: 0 2px 8px rgba(0,0,0,.45); }
+      .overlay-chip { display: inline-block; margin: 22px 0 0; padding: @@TOK_BADGE_PAD@@;
+                      border-radius: @@TOK_BADGE_RADIUS@@; background: @@TOK_BADGE_FILL@@;
+                      color: @@TOK_BADGE_TEXT@@; border-bottom: @@TOK_BADGE_BORDER@@;
+                      font-size: @@TOK_BADGE_SIZE@@; font-weight: @@TOK_BADGE_WEIGHT@@; }
+      .card-clip.hero { align-items: center; padding-bottom: 20%; }
+      .card.hero { width: 100%; padding: 56px 44px; background: @@TOK_HERO_BG@@; border: 0;
+                   border-radius: 0; backdrop-filter: none; box-shadow: none; text-align: center; }
+      .card.plate { background: @@TOK_ACCENT@@; border: 0; box-shadow: none; }
+      .card.plate .line-text { color: @@TOK_ACCENT_INK@@; text-shadow: none; }
+      .card.plate .overlay-chip { background: @@TOK_INK@@; color: @@TOK_ACCENT@@;
+                                  border-bottom: 0; }
     </style>
   </head>
   <body>
@@ -77,14 +87,15 @@ def _is_photo(shot: dict, asset: dict) -> bool:
 
 
 def _media_layers(
-    shots: list[dict], assets: dict[str, dict], freeze_src: dict[str, str]
+    shots: list[dict], assets: dict[str, dict], freeze_src: dict[str, str], tokens: dict
 ) -> tuple[list[str], list[str]]:
     """One full-bleed element per shot, plus the slow-zoom tweens for photo shots.
 
     Photos keep the proven shape of an untimed `<img>` inside a timed section, because the
     zoom has to animate a non-media node. Consecutive photo shots of the same asset become a
     single section so the zoom never restarts mid-sequence. Clips are the timed media element
-    itself, which is why they are never wrapped in anything else carrying `data-start`.
+    itself, which is why they are never wrapped in anything else carrying `data-start`. How far the
+    camera pushes in comes from the tone's motion tokens.
     """
     layers: list[str] = []
     tweens: list[str] = []
@@ -115,8 +126,8 @@ def _media_layers(
                 f"      </section>"
             )
             tweens.append(
-                f'      tl.fromTo("#shot-{shot["id"]} .media", {{ scale: 1 }}, '
-                f'{{ scale: 1.08, duration: {span}, ease: "none" }}, {start});'
+                f'      tl.fromTo("#shot-{shot["id"]} .media", {{ scale: {tokens["zoom_from"]} }}, '
+                f'{{ scale: {tokens["zoom_to"]}, duration: {span}, ease: "none" }}, {start});'
             )
             index = last + 1
             continue
@@ -138,29 +149,41 @@ def _media_layers(
     return layers, tweens
 
 
-def _card_clips(timeline: dict, overlays: dict[str, str]) -> tuple[list[str], list[str]]:
+def _card_clips(
+    timeline: dict, overlays: dict[str, str], tokens: dict
+) -> tuple[list[str], list[str]]:
+    """One card per script line, treated by its position: the opening and closing beat differ.
+
+    Every line is one thought: the text, and the on-screen label the script wrote for it. How the
+    card is dressed comes from the tone's treatment for that position, so the same tokens that style
+    the whole video also decide that the hook is type over the picture rather than another box.
+    """
     cards: list[str] = []
     tweens: list[str] = []
-    for line in timeline["lines"]:
+    lines = timeline["lines"]
+    for index, line in enumerate(lines):
         lid = line["id"]
         duration = max(0.1, round(line["end"] - line["start"], 3))
+        position = "first" if index == 0 else ("last" if index == len(lines) - 1 else "middle")
+        treatment = tones.treat(tokens, position)
         overlay = ""
         chip = overlays.get(lid, line.get("overlay"))
         if chip:
             overlay = f'        <p class="overlay-chip">{html.escape(str(chip))}</p>\n'
         cards.append(
-            f'      <section id="card-{lid}" class="clip card-clip" data-start="{line["start"]}" '
-            f'data-duration="{duration}">\n'
-            f'        <div class="card">\n'
-            f'          <p class="section-tag">{html.escape(str(line["section"]))}</p>\n'
+            f'      <section id="card-{lid}" class="clip card-clip {treatment}" '
+            f'data-start="{line["start"]}" data-duration="{duration}">\n'
+            f'        <div class="card {treatment}">\n'
             f'          <p class="line-text">{html.escape(str(line["text"]))}</p>\n'
             f"{overlay}"
             f"        </div>\n"
             f"      </section>"
         )
         tweens.append(
-            f'      tl.fromTo("#card-{lid} .card", {{ y: 60, opacity: 0 }}, '
-            f'{{ y: 0, opacity: 1, duration: 0.5, ease: "power3.out" }}, {line["start"]});'
+            f'      tl.fromTo("#card-{lid} .card", '
+            f"{{ y: {tokens['entry_travel']}, opacity: 0 }}, "
+            f"{{ y: 0, opacity: 1, duration: {tokens['entry_duration']}, "
+            f'ease: "{tokens["entry_ease"]}" }}, {line["start"]});'
         )
     return cards, tweens
 
@@ -260,6 +283,7 @@ async def run(ctx: dict) -> None:
     if not shots:
         raise StageError("No shots were planned; run the visual stage first.")
     assets = {asset["id"]: asset for asset in state["inputs"].get("assets") or []}
+    tokens = tones.resolve(state.get("style"))
 
     compose_dir = directory / "compose"
     assets_dir = compose_dir / "assets"
@@ -290,9 +314,9 @@ async def run(ctx: dict) -> None:
         if stale.name not in keep:
             stale.unlink(missing_ok=True)
 
-    layers, media_tweens = _media_layers(shots, assets, freeze_src)
+    layers, media_tweens = _media_layers(shots, assets, freeze_src, tokens)
     overlays = {shot["line"]: shot["overlay"] for shot in shots if shot.get("overlay") is not None}
-    cards, card_tweens = _card_clips(timeline, overlays)
+    cards, card_tweens = _card_clips(timeline, overlays, tokens)
 
     page = (
         TEMPLATE.replace("@@WIDTH@@", str(RENDER_WIDTH))
@@ -303,6 +327,29 @@ async def run(ctx: dict) -> None:
         .replace("@@CARDS@@", "\n".join(cards))
         .replace("@@TWEENS@@", "\n".join(media_tweens + card_tweens))
         .replace("@@MUSIC@@", _music_element(music_src, timeline["total"]))
+        .replace("@@TOK_FONT@@", tokens["font"])
+        .replace("@@TOK_LINE_SPACING@@", tokens["line_spacing"])
+        .replace("@@TOK_LINE_WEIGHT@@", tokens["line_weight"])
+        .replace("@@TOK_LINE_SIZE@@", tokens["line_size"])
+        .replace("@@TOK_LINE_CASE@@", tokens["line_case"])
+        .replace("@@TOK_CARD_PADDING@@", tokens["card_padding"])
+        .replace("@@TOK_CARD_RADIUS@@", tokens["card_radius"])
+        .replace("@@TOK_CARD_BLUR@@", tokens["card_blur"])
+        .replace("@@TOK_CARD_BORDER@@", tokens["card_border"])
+        .replace("@@TOK_CARD_BG@@", tokens["card_bg"])
+        .replace("@@TOK_BADGE_WEIGHT@@", tokens["badge_weight"])
+        .replace("@@TOK_BADGE_SIZE@@", tokens["badge_size"])
+        .replace("@@TOK_BADGE_RADIUS@@", tokens["badge_radius"])
+        .replace("@@TOK_BADGE_BORDER@@", tokens["badge_border"])
+        .replace("@@TOK_BADGE_FILL@@", tokens["badge_fill"])
+        .replace("@@TOK_BADGE_TEXT@@", tokens["badge_text"])
+        .replace("@@TOK_BADGE_PAD@@", tokens["badge_pad"])
+        .replace("@@TOK_HERO_BG@@", tokens["hero_bg"])
+        .replace("@@TOK_SHADE@@", tokens["shade"])
+        .replace("@@TOK_ACCENT_INK@@", tokens["accent_ink"])
+        .replace("@@TOK_ACCENT@@", tokens["accent"])
+        .replace("@@TOK_INK@@", tokens["ink"])
+        .replace("@@TOK_BG@@", tokens["bg"])
     )
     (compose_dir / "index.html").write_text(page, encoding="utf-8")
 

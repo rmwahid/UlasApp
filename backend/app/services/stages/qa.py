@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.services.shotlist import FREEZE_EPSILON, MODE_FREEZE, MODE_PHOTO
-from app.services.state import QA_FILE, StageError, write_json
+from app.services.state import HOOK_SECTION, QA_FILE, StageError, write_json
 
 
 def _shot_plan_check(shots: list[dict], lines: list[dict], total: float) -> dict:
@@ -70,6 +70,51 @@ def _shot_material_check(shots: list[dict], assets: dict[str, dict], directory: 
     }
 
 
+def _reading_time_check(lines: list[dict], settle: float, per_word: float) -> dict:
+    """Every card stays up long enough to be read, judged by how much text it carries.
+
+    A floor on card time (checked separately) says nothing about a card carrying a long sentence:
+    the honest rule is a settled beat plus a per-word reading time. With the shipped spine settings
+    every line clears this with margin, so a failure means the spine was retuned to something too
+    fast for the text it produces.
+    """
+    too_fast: list[str] = []
+    for line in lines:
+        words = len(str(line.get("text") or "").split())
+        window = float(line["end"]) - float(line["start"])
+        needed = settle + words * per_word
+        if window + 0.011 < needed:
+            too_fast.append(f"{line['id']} {words} words in {window:.2f}s needs {needed:.2f}s")
+    return {
+        "name": "card_reading_time",
+        "passed": not too_fast,
+        "detail": "; ".join(too_fast)
+        if too_fast
+        else f"{len(lines)} cards hold at least {settle}s plus {per_word}s per word",
+    }
+
+
+def _hook_card_time_check(lines: list[dict], minimum: float) -> dict:
+    """The opening card holds longer than the rest: a viewer has not committed to this video yet.
+
+    The spine gives the hook that floor, so a failure means the spine was retuned or a script came
+    back with a section other than the hook in the opening line.
+    """
+    hook = next((line for line in lines if line.get("section") == HOOK_SECTION), None)
+    if hook is None:
+        return {
+            "name": "hook_card_time",
+            "passed": False,
+            "detail": "the script has no hook line to open with",
+        }
+    window = float(hook["end"]) - float(hook["start"])
+    return {
+        "name": "hook_card_time",
+        "passed": window + 0.011 >= minimum,
+        "detail": f"{hook['id']} holds {window:.2f}s, {minimum}s needed for the opening card",
+    }
+
+
 async def run(ctx: dict) -> None:
     settings = get_settings()
     directory = Path(ctx["dir"])
@@ -104,8 +149,12 @@ async def run(ctx: dict) -> None:
         }
     )
 
+    checks.append(_hook_card_time_check(lines, settings.hook_min_card_seconds))
     checks.append(_shot_plan_check(shots, lines, float(timeline.get("total") or 0.0)))
     checks.append(_shot_material_check(shots, assets, directory))
+    checks.append(
+        _reading_time_check(lines, settings.read_settle_seconds, settings.read_seconds_per_word)
+    )
 
     video_rel = state.get("outputs", {}).get("video", "output/video.mp4")
     video = directory / video_rel

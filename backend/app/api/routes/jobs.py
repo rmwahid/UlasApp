@@ -4,6 +4,7 @@ import asyncio
 import json
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,11 +19,14 @@ from app.core import media
 from app.core.config import get_settings
 from app.core.db import engine
 from app.models import Job, _new_id
-from app.services import pipeline, shotlist, uploads
+from app.services import beats, pipeline, shotlist, tones, uploads
+from app.services import brief as brief_service
 from app.services.events import subscribe, unsubscribe
 from app.services.pipeline import ProjectBusyError
 from app.services.state import (
     SHOTLIST_FILE,
+    StageError,
+    default_style,
     initial_state,
     project_dir,
     read_state,
@@ -180,6 +184,13 @@ def _start(job_id: str, stages: list[str]) -> None:
             status_code=409,
             detail=f"'{exc}' is still working. Wait for it to finish before starting another run.",
         ) from exc
+    except KeyError as exc:
+        # The row can outlive its folder (a project deleted outside the app). Answer with a clear
+        # error instead of a 500.
+        raise HTTPException(
+            status_code=404,
+            detail="The project files are missing from disk, so this project cannot run.",
+        ) from exc
 
 
 @router.post("/{job_id}/describe")
@@ -203,7 +214,13 @@ def start_render(job_id: str, payload: BriefUpdate | None = None) -> dict:
         raise HTTPException(status_code=409, detail="This project is already rendering")
     if payload is not None:
         _save_brief(job, payload)
-    stages = _render_stages(read_state(Path(job.project_dir)))
+    state = read_state(Path(job.project_dir))
+    if not state:
+        raise HTTPException(
+            status_code=404,
+            detail="The project files are missing from disk, so this project cannot be rendered.",
+        )
+    stages = _render_stages(state)
     _start(job_id, stages)
     return {"started": "render", "stages": stages}
 
@@ -246,6 +263,109 @@ def update_brief(job_id: str, payload: BriefUpdate) -> dict:
         raise HTTPException(status_code=409, detail="This project is still working")
     _save_brief(job, payload)
     return read_state(Path(job.project_dir)).get("brief", {})
+
+
+@router.post("/{job_id}/brief/draft")
+async def draft_brief(job_id: str) -> dict:
+    """Propose a brief from the product facts and the material, for the user to edit before saving."""
+    job = _get_job(job_id)
+    if job.status in ("queued", "running"):
+        raise HTTPException(status_code=409, detail="This project is still working")
+    state = read_state(Path(job.project_dir))
+    if not state:
+        raise HTTPException(status_code=404, detail="Project state is missing")
+    try:
+        return await brief_service.draft(state)
+    except StageError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+class StyleUpdate(BaseModel):
+    """The look and the beat order. Only the shape changes the words of the script."""
+
+    shape: str | None = None
+    beats: list[str] | None = None
+    tone: str | None = None
+    accent: str | None = None
+    energy: str | None = None
+    badge: str | None = None
+
+
+HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _style_catalog() -> dict:
+    """Everything the Style panel needs to draw itself: presets, the beat library and the options."""
+    return {
+        "tones": tones.catalog(),
+        "shapes": [
+            {
+                "id": name,
+                "label": shape["label"],
+                "character": shape["character"],
+                "beats": shape["beats"],
+            }
+            for name, shape in beats.SHAPES.items()
+        ],
+        "beats": [
+            {
+                "id": name,
+                "label": spec["label"],
+                "once_only": spec["once_only"],
+                "max_words": spec["max_words"],
+            }
+            for name, spec in beats.BEATS.items()
+        ],
+        "custom": beats.CUSTOM_SHAPE,
+        "min_beats": beats.MIN_BEATS,
+        "max_beats": beats.MAX_BEATS,
+        "energies": list(tones.ENERGIES),
+        "badges": list(tones.BADGES),
+    }
+
+
+@router.patch("/{job_id}/style")
+def update_style(job_id: str, payload: StyleUpdate) -> dict:
+    """Save the shape, tone and overrides, refusing anything the composition could not render."""
+    job = _get_job(job_id)
+    if job.status in ("queued", "running"):
+        raise HTTPException(status_code=409, detail="This project is still working")
+    directory = Path(job.project_dir)
+    state = read_state(directory)
+    if not state:
+        raise HTTPException(status_code=404, detail="Project state is missing")
+    style = {**default_style(), **(state.get("style") or {})}
+    changes = payload.model_dump(exclude_none=True)
+    accent = changes.get("accent")
+    if accent and not HEX_COLOR.match(accent):
+        raise HTTPException(status_code=422, detail="accent must be a hex colour like #f5b52e")
+    style.update(changes)
+    try:
+        beats.resolve_beats(style.get("shape") or beats.DEFAULT_SHAPE, style.get("beats"))
+        tones.resolve(style)
+    except (beats.BeatError, tones.ToneError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    stored = state.get("script_fingerprint")
+    state["style"] = style
+    write_state(directory, state)
+    return {
+        "style": style,
+        "script_exists": bool(stored),
+        "script_rewrites": _script_rewrite_needed(state, style),
+    }
+
+
+def _script_rewrite_needed(previous: dict, style: dict) -> bool:
+    """Whether this change means the next generate writes the script again.
+
+    The stored fingerprint is what the current script was written from, so comparing it with the
+    fingerprint of the new style answers the question for any change, not just the shape. With no
+    script written yet nothing is rewritten: the first generate builds everything anyway.
+    """
+    stored = previous.get("script_fingerprint")
+    if not stored:
+        return False
+    return stored != script_fingerprint({**previous, "style": style})
 
 
 class AssetUpdate(BaseModel):
@@ -346,8 +466,10 @@ def get_job_detail(job_id: str) -> dict:
             "inputs": state.get("inputs", {}),
             "shotlist": state.get("shotlist", {"shots": []}),
             "brief": state.get("brief") or {"direction": "", "overlay_style": ""},
+            "style": state.get("style") or default_style(),
             "describe": state.get("describe") or {},
         },
+        "style_catalog": _style_catalog(),
         "assets": _asset_entries(job_id, state),
         "versions": _version_entries(job_id, state),
         "video_url": video_url,

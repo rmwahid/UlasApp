@@ -19,19 +19,33 @@ web workspace.
   scene frames); you can correct any description, and the corrections are what matching uses. One
   button generates the missing descriptions in bulk, and each tile shows whether its description is
   filled in yet
-- Photos and clips to a 9:16 review video: AI script in casual Bahasa Indonesia with UGC structure
-  (hook / problem / solution / proof / CTA) that follows your brief, automatic shot ordering,
-  on-screen text cards, background music
+- Photos and clips to a 9:16 review video: AI script in casual Bahasa Indonesia that follows your brief,
+  automatic shot ordering, on-screen text cards, background music
+- Shape and Tone, chosen per project. Shape is the order of the beats: two presets (Ulasan, Reveal) or
+  your own order built from a locked library of 11 beats (hook, bait, problem, reveal, demo, solution,
+  proof, comparison, objection, social proof, CTA), with a live duration estimate. Tone carries the
+  look: typography, palette, badge treatment, motion and how the first, middle and last beat are
+  treated (four presets: Bersih, Tegas, Hangat, Toko), plus three overrides for accent colour, motion
+  and badge style. Changing the beat order writes a new script; changing the tone only renders again,
+  and the panel says which will happen before you commit
+- The script aims to sell, not to list: every fact has to reach what it means for the buyer, at least
+  one line is proven on camera, and invented claims, fake urgency and unverifiable superlatives are
+  banned by the prompt
 - Material handling: up to 20 photos and clips in the order you want, a hero shot, scene detection
   per clip, clips trimmed to the line they cover (with a frozen last frame when a clip is shorter
   than its line)
-- A workspace built around the work: the steps on the left (Media, Brief, Music, and the Voice Clone
-  step that arrives with the voice phase), the media or the step's content next to it, the preview on
-  the right, and the storyboard along the bottom with a timeline ruler, the shot clips, the on-screen
-  text per line and the music track. Clicking a clip jumps the preview there
+- A workspace built around the work: the steps on the left (Media, Brief, Style, Music, and the Voice
+  Clone step that arrives with the voice phase), the media or the step's content next to it, the
+  preview on the right, and the storyboard along the bottom with a timeline ruler, the shot clips, the
+  on-screen text per line and the music track. Clicking a clip jumps the preview there
+- The brief can be written by hand, started from one of four example briefs, or drafted from the
+  product details and the material descriptions with one button
 - Editing a shot line from the interface (swapping its material, typing its on-screen text, locking it)
   is not exposed yet; the engine supports it through the API and the end-to-end checks, and the
   controls return together with the multi-track timeline
+- Readability is checked, not assumed: every text card has to stay up long enough to be read (a
+  settled beat plus a per-word reading time), the opening card holds longer than the rest, the shots
+  have to cover every script line, and the rendered length has to match the timeline
 - Local engine: resumable stages (describe, script, visual, compose, QA) over a per-project state
   file, SQLite storage, live progress streamed to the UI; one render at a time
 - Desktop app: a Tauri window that starts the engine, shows the same UI, and restarts the engine if it

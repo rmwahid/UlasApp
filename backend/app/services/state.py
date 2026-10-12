@@ -1,4 +1,4 @@
-"""Project folder layout, the state.json contract, the brief, and the timeline spine."""
+"""Project folder layout, the state.json contract, the brief, the style block, and the timeline spine."""
 
 import hashlib
 import json
@@ -6,6 +6,9 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from app.services.beats import DEFAULT_SHAPE, resolve_beats
+from app.services.tones import DEFAULT_BADGE, DEFAULT_ENERGY, DEFAULT_TONE
 
 STATE_FILE = "state.json"
 SCRIPT_FILE = "script.json"
@@ -18,6 +21,21 @@ SLUG_MAX_CHARS = 40
 # The stages a project runs, in order. `describe` only writes material descriptions, so the user can
 # check and correct what the vision model saw before anything is rendered.
 STAGE_NAMES = ("describe", "script", "visual", "compose", "qa")
+
+# The one section every script opens with, whatever else its shape contains.
+HOOK_SECTION = "hook"
+
+
+def default_style() -> dict:
+    """The style block a project starts with: the default shape, tone and overrides."""
+    return {
+        "shape": DEFAULT_SHAPE,
+        "beats": [],
+        "tone": DEFAULT_TONE,
+        "accent": None,
+        "energy": DEFAULT_ENERGY,
+        "badge": DEFAULT_BADGE,
+    }
 
 
 class StageError(RuntimeError):
@@ -38,11 +56,15 @@ def script_fingerprint(state: dict) -> str:
     """What the script was written from: when this changes, the script has to be written again.
 
     Editing a description or the storyboard keeps the same fingerprint, so generating another
-    version reuses the approved script instead of quietly rewriting the user's lines.
+    version reuses the approved script instead of quietly rewriting the user's lines. The beat order
+    of the chosen shape IS part of it, because a different order means different lines; the tone and
+    its overrides are not, because they only change how the same lines look.
     """
+    style = state.get("style") or {}
     source = {
         "product": (state.get("inputs") or {}).get("product") or {},
         "brief": state.get("brief") or {},
+        "beats": resolve_beats(style.get("shape") or DEFAULT_SHAPE, style.get("beats")),
     }
     return hashlib.sha256(
         json.dumps(source, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -81,6 +103,7 @@ def initial_state(job_id: str, title: str, aspect: str, mode: str, inputs: dict)
         "mode": mode,
         "inputs": inputs,
         "brief": {"direction": "", "overlay_style": ""},
+        "style": default_style(),
         "stages": {name: {"status": "pending"} for name in STAGE_NAMES},
         "timeline": {"spine": "duration", "total": 0.0, "lines": []},
         "shotlist": {"shots": []},
@@ -99,11 +122,13 @@ def compute_spine(
     words_per_second: float,
     min_card_seconds: float,
     line_pause_seconds: float,
+    hook_min_card_seconds: float = 0.0,
 ) -> dict:
     """Duration-spine timeline: contiguous per-line windows from reading-speed estimates.
 
     Every line gets absolute start/end seconds; cards are contiguous (the inter-line pause is
-    part of each card window), so the timeline has no gaps.
+    part of each card window), so the timeline has no gaps. A hook line holds for at least
+    hook_min_card_seconds, because a viewer who has not committed yet needs longer on screen.
     """
     cursor = 0.0
     timed: list[dict] = []
@@ -111,7 +136,8 @@ def compute_spine(
         words = len(line["say"].split())
         speech = words / max(words_per_second, 0.5)
         pause = line_pause_seconds if index < len(lines) - 1 else 0.0
-        duration = max(min_card_seconds, speech) + pause
+        floor = hook_min_card_seconds if line["section"] == HOOK_SECTION else min_card_seconds
+        duration = max(floor, min_card_seconds, speech) + pause
         timed.append(
             {
                 "id": f"L{index + 1}",

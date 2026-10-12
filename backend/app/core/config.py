@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     reading_words_per_second: float = 2.7
     min_card_seconds: float = 1.8
     line_pause_seconds: float = 0.35
+    # The hook is the one card a viewer has not committed to yet, so it holds longer than the rest
+    # even when its line is short.
+    hook_min_card_seconds: float = 2.6
+
+    # Card readability: a card must stay up long enough to be READ, not just long enough to feel
+    # calm. QA checks every card against a settled beat plus a per-word reading time.
+    read_settle_seconds: float = 0.55
+    read_seconds_per_word: float = 0.26
 
     # Material indexing: scene-change sensitivity of the clip scan (higher = fewer scenes)
     scene_threshold: float = 10.0
