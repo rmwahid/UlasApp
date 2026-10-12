@@ -268,11 +268,12 @@
     <fieldset>
       <legend>Video brief</legend>
       <p class="hint">
-        Your direction for the video itself, separate from what the material shows: the story, the
-        pacing, the effects, how the on-screen text should read.
+        Content only: what this video should say and which facts must appear. The look and the beat
+        order are set in the project workspace, on the Style step. You can leave these empty and fill
+        them later, or let the app draft them from the product.
       </p>
       <label>
-        Creative direction
+        What should this video say?
         <textarea
           bind:value={direction}
           rows="3"
@@ -280,11 +281,11 @@
         ></textarea>
       </label>
       <label>
-        On-screen text style
+        Facts that must appear on screen
         <textarea
           bind:value={overlayStyle}
           rows="2"
-          placeholder="e.g. short uppercase lines, price always visible, no emoji"
+          placeholder="e.g. the price always shows, mention the water resistance"
         ></textarea>
       </label>
     </fieldset>

@@ -11,6 +11,11 @@
   let shots = [];
   let lines = [];
   let brief = { direction: "", overlay_style: "" };
+  let style = { shape: "ulasan", beats: [], tone: "bersih", accent: null, energy: "normal", badge: "pill" };
+  let catalog = null;
+  let styleNote = "";
+  let beatDraft = [];
+  let drafting = false;
   let activeTab = "media";
   let selectedAssetId = null;
   let showVersions = false;
@@ -19,6 +24,7 @@
   let note = "";
   let saving = false;
   let askedDescribe = false;
+  let drafts = {};
   let source = null;
   let videoEl = null;
   let playing = false;
@@ -30,8 +36,36 @@
   const rail = [
     { key: "media", icon: "▦", label: "Media" },
     { key: "brief", icon: "✎", label: "Brief" },
+    { key: "style", icon: "◐", label: "Style" },
     { key: "music", icon: "♪", label: "Music" },
     { key: "voice", icon: "◍", label: "Voice Clone" },
+  ];
+
+  const briefExamples = [
+    {
+      label: "Daily review",
+      direction:
+        "buka dengan produknya langsung dipakai, santai seperti cerita ke teman, tunjukkan satu hal yang paling terasa bedanya",
+      overlay_style: "harga selalu tampil, sebut satu keunggulan saja",
+    },
+    {
+      label: "Quick unboxing",
+      direction:
+        "mulai dari paket dibuka, sorot isinya satu per satu singkat, tutup dengan produknya dipakai sekali",
+      overlay_style: "nama produk dan harganya muncul di awal",
+    },
+    {
+      label: "Before vs after",
+      direction:
+        "bandingkan yang lama dengan yang baru: masalah dulu, lalu produknya dipakai dan hasilnya kelihatan",
+      overlay_style: "tekankan bedanya, jangan ulang angka harga",
+    },
+    {
+      label: "Durability test",
+      direction:
+        "buka dengan pertanyaan menantang, lalu uji produknya di kamera (air, jatuh, dipakai seharian) dan tunjukkan hasilnya apa adanya",
+      overlay_style: "tulis hasil ujinya, bukan klaim",
+    },
   ];
 
   const stageChips = [
@@ -51,6 +85,19 @@
   $: currentVersion = shownVersion ?? (versions.length ? versions[0].number : null);
   $: versionLabel = currentVersion ? `v${currentVersion}` : "";
   $: musicName = state?.inputs?.music ? state.inputs.music.split("/").pop() : null;
+  $: chipStates = stageChips.map((chip) => ({
+    ...chip,
+    status: state?.stages?.[chip.key]?.status || "pending",
+  }));
+  $: selectedUsage = selectedAsset ? selectedAssetUsage(selectedAsset.id) : "";
+  $: shapeLabel =
+    style.shape === "custom"
+      ? "Custom"
+      : (catalog?.shapes?.find((item) => item.id === style.shape)?.label ?? "Ulasan");
+  $: toneLabel = catalog?.tones?.find((item) => item.id === style.tone)?.label ?? "Bersih";
+  $: beatList = style.shape === "custom" ? style.beats : (catalog?.shapes?.find((item) => item.id === style.shape)?.beats ?? []);
+  $: estimate = estimateSeconds(style.shape === "custom" ? beatDraft : beatList);
+  $: extras = (catalog?.beats ?? []).filter((beat) => !beatDraft.includes(beat.id) || !beat.once_only);
 
   function closeStream() {
     if (source) source.close();
@@ -73,9 +120,11 @@
           };
         }
         if (job) job = { ...job, status: "running", stage: message.stage };
+        if (message.status === "done") load();
       }
       if (message.type === "done") {
         closeStream();
+        note = "";
         load();
       }
     };
@@ -85,14 +134,25 @@
     };
   }
 
+  function draftFor(asset) {
+    return asset.id in drafts ? drafts[asset.id] : asset.description || "";
+  }
+
+  function rememberDraft(asset) {
+    drafts = { ...drafts, [asset.id]: asset.draft };
+  }
+
   function buildShots(shotlist) {
+    const overlays = {};
+    for (const line of lines) overlays[line.id] = line.overlay || line.section;
     return (shotlist || []).map((shot) => ({
       ...shot,
       thumb: `/api/jobs/${id}/assets/${shot.asset}/thumb`,
+      overlayText: overlays[shot.line] || "",
     }));
   }
 
-  function usedBy(assetId) {
+  function selectedAssetUsage(assetId) {
     return shots
       .filter((shot) => shot.asset === assetId)
       .map((shot) => shot.line)
@@ -106,11 +166,14 @@
       const data = await response.json();
       job = data.job;
       state = data.state;
-      assets = data.assets.map((asset) => ({ ...asset, draft: asset.description || "" }));
+      assets = data.assets.map((asset) => ({ ...asset, draft: draftFor(asset) }));
       versions = data.versions || [];
       lines = data.state.timeline.lines || [];
       shots = buildShots(data.state.shotlist.shots);
       brief = { ...data.state.brief };
+      style = { ...data.state.style };
+      catalog = data.style_catalog || null;
+      beatDraft = [...(style.beats?.length ? style.beats : beatList)];
       posterUrl = data.poster_url;
       if (selectedAssetId && !assets.some((asset) => asset.id === selectedAssetId)) {
         selectedAssetId = null;
@@ -172,6 +235,7 @@
           ? { ...item, description: data.description, draft: data.description || "" }
           : item,
       );
+      drafts = { ...drafts, [asset.id]: data.description || "" };
       note = `Description of ${asset.id} saved. It is used the next time you generate.`;
     } catch (err) {
       error = err.message;
@@ -188,6 +252,97 @@
     } catch (err) {
       error = err.message;
     }
+  }
+
+  function applyExample(example) {
+    brief = { direction: example.direction, overlay_style: example.overlay_style };
+    saveBrief();
+    note = `Example "${example.label}" filled in. Edit it, then click away to save.`;
+  }
+
+  async function draftBrief() {
+    drafting = true;
+    error = "";
+    note = "";
+    try {
+      const response = await fetch(`/api/jobs/${id}/brief/draft`, { method: "POST" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `Request failed (${response.status})`);
+      }
+      const draft = await response.json();
+      brief = { direction: draft.direction, overlay_style: draft.overlay_style };
+      await saveBrief();
+      note = "Draft written from the product and the material. Edit it before generating.";
+    } catch (err) {
+      error = err.message;
+    } finally {
+      drafting = false;
+    }
+  }
+
+  function estimateSeconds(list) {
+    // The same arithmetic the engine's reading spine uses, so the number shown is the number you get.
+    let total = 0;
+    list.forEach((beatId, index) => {
+      const spec = catalog?.beats?.find((beat) => beat.id === beatId);
+      const words = Math.min(spec?.max_words ?? 14, 12);
+      const floor = beatId === "hook" ? 2.6 : 1.8;
+      total += Math.max(floor, words / 2.7) + (index < list.length - 1 ? 0.35 : 0);
+    });
+    return Math.max(0, Math.round(total));
+  }
+
+  async function saveStyle(changes) {
+    error = "";
+    styleNote = "";
+    try {
+      const response = await fetch(`/api/jobs/${id}/style`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(changes),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `Request failed (${response.status})`);
+      }
+      const data = await response.json();
+      style = { ...data.style };
+      styleNote = !data.script_exists
+        ? "Saved. No script exists yet, so the first generate writes everything."
+        : data.script_rewrites
+          ? "Saved. The next generate writes a new script with this beat order."
+          : "Saved. The script is kept; the next generate only renders again.";
+      if (!(style.beats?.length)) beatDraft = [...beatList];
+    } catch (err) {
+      error = err.message;
+    }
+  }
+
+  function pickShape(shapeId) {
+    saveStyle({ shape: shapeId, beats: [] });
+    beatDraft = [...(catalog?.shapes?.find((item) => item.id === shapeId)?.beats ?? [])];
+  }
+
+  function addBeat(beatId) {
+    if (!beatId) return;
+    beatDraft = [...beatDraft, beatId];
+  }
+
+  function removeBeat(index) {
+    beatDraft = beatDraft.filter((_, position) => position !== index);
+  }
+
+  function moveBeat(index, delta) {
+    const next = [...beatDraft];
+    const target = index + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    beatDraft = next;
+  }
+
+  function saveBeats() {
+    saveStyle({ shape: "custom", beats: beatDraft });
   }
 
   async function reveal() {
@@ -221,10 +376,6 @@
   function seekTo(seconds) {
     currentTime = seconds;
     if (videoEl) videoEl.currentTime = seconds;
-  }
-
-  function statusFor(stage) {
-    return state?.stages?.[stage]?.status || "pending";
   }
 
   function formatTime(seconds) {
@@ -321,17 +472,184 @@
         </p>
       {:else if activeTab === "brief"}
         <header class="panel-head"><h2>Video brief</h2></header>
-        <p class="hint">What you want the video to be, separate from what the material shows.</p>
+        <p class="role-line">
+          <strong>Content.</strong> What you want this video to say. The look and the beat order live
+          in <button type="button" class="linkish" on:click={() => (activeTab = "style")}>Style</button>.
+        </p>
+        <div class="row wrap">
+          <button type="button" disabled={drafting} on:click={draftBrief}>
+            {drafting ? "Menyusun draf..." : "Draft from product and material"}
+          </button>
+        </div>
+        <p class="hint">Or start from an example (you can edit everything after):</p>
+        <div class="row wrap">
+          {#each briefExamples as example}
+            <button type="button" class="chip-button" on:click={() => applyExample(example)}>
+              {example.label}
+            </button>
+          {/each}
+        </div>
         <label>
-          Creative direction
-          <textarea rows="6" bind:value={brief.direction} on:blur={saveBrief}
-            placeholder="e.g. open with the watch on my wrist, keep it casual, show it gets wet and still works"></textarea>
+          What should this video say?
+          <textarea rows="5" bind:value={brief.direction} on:blur={saveBrief}
+            placeholder="Arahannya, misalnya: buka dengan jam di pergelangan tangan, santai, tunjukkan jam kena air tetap jalan"></textarea>
         </label>
         <label>
-          On-screen text style
+          Facts that must appear on screen
           <textarea rows="3" bind:value={brief.overlay_style} on:blur={saveBrief}
-            placeholder="e.g. short uppercase lines, price always visible"></textarea>
+            placeholder="Isi teksnya, misalnya: harga selalu tampil, sebut ketahanan air"></textarea>
         </label>
+        <p class="hint">
+          Saving the brief never renders. The words change the script; the size, the colour and the
+          badge shape come from Style.
+        </p>
+      {:else if activeTab === "style"}
+        <header class="panel-head"><h2>Style</h2></header>
+        <p class="role-line">
+          <strong>Form.</strong> The order of the beats and how the video looks. Changing the beat
+          order writes a new script; changing the tone only re-renders.
+        </p>
+        {#if catalog}
+          <p class="label-line">Beat order</p>
+          <div class="row wrap">
+            {#each catalog.shapes as preset}
+              <button
+                type="button"
+                class="chip-button"
+                class:active={style.shape === preset.id}
+                on:click={() => pickShape(preset.id)}
+                title={preset.character}
+              >
+                {preset.label}
+              </button>
+            {/each}
+            <button
+              type="button"
+              class="chip-button"
+              class:active={style.shape === "custom"}
+              on:click={() => (beatDraft = [...beatList], saveBeats())}
+            >
+              Custom
+            </button>
+          </div>
+          <ol class="beats">
+            {#each (style.shape === "custom" ? beatDraft : beatList) as beatId, index}
+              <li>
+                <span class="beat-label">
+                  {catalog.beats.find((beat) => beat.id === beatId)?.label ?? beatId}
+                </span>
+                {#if beatId === "hook" || beatId === "cta"}
+                  <span class="beat-flag">required</span>
+                {/if}
+              </li>
+            {/each}
+          </ol>
+          <p class="hint">
+            Roughly {estimate} seconds. Every beat needs reading time, so more beats means a longer
+            video.
+          </p>
+          <details class="editor">
+            <summary>Build your own order</summary>
+            <p class="hint">
+              Pick beats from the library, put them in order, then save. The hook stays first and the
+              CTA stays last; {catalog.min_beats} to {catalog.max_beats} beats.
+            </p>
+            <ol class="beats editable">
+              {#each beatDraft as beatId, index}
+                <li>
+                  <span class="beat-label">
+                    {catalog.beats.find((beat) => beat.id === beatId)?.label ?? beatId}
+                  </span>
+                  <span class="beat-tools">
+                    <button type="button" on:click={() => moveBeat(index, -1)} disabled={index === 0}>↑</button>
+                    <button type="button" on:click={() => moveBeat(index, 1)} disabled={index === beatDraft.length - 1}>↓</button>
+                    <button type="button" on:click={() => removeBeat(index)} disabled={beatId === "hook" || beatId === "cta"}>✕</button>
+                  </span>
+                </li>
+              {/each}
+            </ol>
+            <p class="hint">Add a beat:</p>
+            <div class="row wrap">
+              {#each catalog.beats as beat}
+                <button
+                  type="button"
+                  class="chip-button"
+                  on:click={() => addBeat(beat.id)}
+                  disabled={beat.once_only && beatDraft.includes(beat.id)}
+                >
+                  + {beat.label}
+                </button>
+              {/each}
+            </div>
+            <div class="row">
+              <button type="button" on:click={saveBeats}>Save this order</button>
+            </div>
+          </details>
+
+          <p class="label-line">Tone</p>
+          <ul class="tones">
+            {#each catalog.tones as tone}
+              <li>
+                <button
+                  type="button"
+                  class="tone"
+                  class:active={style.tone === tone.id}
+                  on:click={() => saveStyle({ tone: tone.id })}
+                >
+                  <span
+                    class="tone-swatch"
+                    style={`background: ${tone.preview.bg}; border-color: ${tone.preview.accent}`}
+                  >
+                    <span class="tone-dot" style={`background: ${tone.preview.accent}`}></span>
+                    <span class="tone-ink" style={`color: ${tone.preview.ink}`}>Aa</span>
+                  </span>
+                  <span class="tone-name">{tone.label}</span>
+                  <span class="tone-character">{tone.character}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+
+          <p class="label-line">Overrides</p>
+          <p class="hint">Only these three, and only if you want to differ from the tone.</p>
+          <p class="facts-line">
+            Accent colour
+            <span class="swatches">
+              <button type="button" class="swatch default" class:active={!style.accent} on:click={() => saveStyle({ accent: null })} title="Tone default"></button>
+              {#each ["#f5b52e", "#ff4d2e", "#ffd400", "#38d9a9", "#4dabf7", "#e599f7", "#ff8fab", "#ffffff"] as color}
+                <button
+                  type="button"
+                  class="swatch"
+                  class:active={style.accent === color}
+                  style={`background: ${color}`}
+                  on:click={() => saveStyle({ accent: color })}
+                  title={color}
+                ></button>
+              {/each}
+            </span>
+          </p>
+          <p class="facts-line">
+            Motion
+            <span class="row">
+              {#each catalog.energies as option}
+                <button type="button" class="chip-button" class:active={style.energy === option} on:click={() => saveStyle({ energy: option })}>
+                  {option}
+                </button>
+              {/each}
+            </span>
+          </p>
+          <p class="facts-line">
+            Label badge
+            <span class="row">
+              {#each catalog.badges as option}
+                <button type="button" class="chip-button" class:active={style.badge === option} on:click={() => saveStyle({ badge: option })}>
+                  {option === "pill" ? "filled pill" : option === "underline" ? "underline" : "plain text"}
+                </button>
+              {/each}
+            </span>
+          </p>
+          {#if styleNote}<p class="hint">{styleNote}</p>{/if}
+        {/if}
       {:else if activeTab === "music"}
         <header class="panel-head"><h2>Music</h2></header>
         {#if musicName}
@@ -371,12 +689,13 @@
           <textarea
             rows="8"
             bind:value={selectedAsset.draft}
+            on:input={() => rememberDraft(selectedAsset)}
             on:blur={() => saveAsset(selectedAsset)}
             placeholder="Describe what this file shows"
           ></textarea>
         </label>
         <p class="hint">Saved when you click away. These words are what the shot matching uses.</p>
-        <p class="facts-line">Used for: {usedBy(selectedAsset.id) || "not used in a shot yet"}</p>
+        <p class="facts-line">Used for: {selectedUsage || "not used in a shot yet"}</p>
         <a class="open" href={selectedAsset.url} target="_blank" rel="noreferrer">Open the original file</a>
       </aside>
     {/if}
@@ -420,12 +739,12 @@
     </section>
   </div>
 
-  <TimelineTracks {shots} {lines} {total} music={musicName} {currentTime} onSeek={seekTo} />
+  <TimelineTracks {shots} {total} music={musicName} {currentTime} onSeek={seekTo} />
 
   <footer class="statusbar">
     <span class="chips">
-      {#each stageChips as chip}
-        <span class="chip {statusFor(chip.key)}">{chip.icon} {chip.label} {statusFor(chip.key)}</span>
+      {#each chipStates as chip}
+        <span class="chip {chip.status}">{chip.icon} {chip.label} {chip.status}</span>
       {/each}
     </span>
     <span class="spacer"></span>
@@ -465,6 +784,7 @@
       <div class="sheet">
         <h2>Generate {versions.length ? `v${versions.length + 1}` : ""}</h2>
         <p class="facts-line">Resolution 1080x1920 (9:16) · aspect presets arrive in phase 4</p>
+        <p class="facts-line">Shape: {shapeLabel} · Tone: {toneLabel}</p>
         <p class="facts-line">
           {assets.length} material · {lines.length} script lines · {described} described
         </p>
@@ -640,8 +960,159 @@
     gap: 8px;
     margin-bottom: 10px;
   }
+  .row.wrap {
+    flex-wrap: wrap;
+  }
   .row.end {
     justify-content: flex-end;
+  }
+  .role-line {
+    margin: 0 0 12px;
+    color: #b7c2cf;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .label-line {
+    margin: 14px 0 6px;
+    color: #8e9aa8;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .linkish {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: #f5b52e;
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .chip-button {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  .chip-button.active {
+    border-color: #f5b52e;
+    color: #f5b52e;
+  }
+  .beats {
+    list-style: none;
+    margin: 8px 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .beats li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid #2a323d;
+    border-radius: 8px;
+    background: #12161c;
+    font-size: 12px;
+  }
+  .beats.editable li {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .beat-flag {
+    color: #8e9aa8;
+    font-size: 10px;
+  }
+  .beat-tools {
+    display: flex;
+    gap: 4px;
+  }
+  .beat-tools button {
+    padding: 2px 7px;
+  }
+  .editor {
+    margin: 10px 0;
+    border: 1px solid #232a34;
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #0f1318;
+  }
+  .editor summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: #cfd8e3;
+  }
+  .tones {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+  .tone {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas: "swatch name" "swatch character";
+    gap: 2px 12px;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+  }
+  .tone.active {
+    border-color: #f5b52e;
+  }
+  .tone-swatch {
+    grid-area: swatch;
+    display: grid;
+    place-items: center;
+    gap: 2px;
+    width: 52px;
+    height: 52px;
+    border: 2px solid;
+    border-radius: 10px;
+  }
+  .tone-dot {
+    width: 18px;
+    height: 6px;
+    border-radius: 3px;
+  }
+  .tone-ink {
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .tone-name {
+    grid-area: name;
+    font-size: 13px;
+    color: #e8ecf1;
+  }
+  .tone-character {
+    grid-area: character;
+    font-size: 11px;
+    color: #8e9aa8;
+    line-height: 1.4;
+  }
+  .swatches {
+    display: flex;
+    gap: 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .swatch {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border-radius: 999px;
+    border: 2px solid #2a323d;
+  }
+  .swatch.active {
+    border-color: #f5b52e;
+  }
+  .swatch.default {
+    background: linear-gradient(135deg, #2a323d 50%, #0e1116 50%);
+  }
+  .facts-line .row {
+    display: inline-flex;
+    margin: 0 0 0 6px;
   }
   .panel label,
   .detail label {

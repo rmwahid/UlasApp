@@ -1,6 +1,5 @@
 <script>
   export let shots = [];
-  export let lines = [];
   export let total = 0;
   export let music = null;
   export let currentTime = 0;
@@ -20,12 +19,6 @@
       marks.push(Number(at.toFixed(3)));
     }
     return marks;
-  }
-
-  function overlayFor(lineId) {
-    const line = lines.find((item) => item.id === lineId);
-    if (!line) return "";
-    return line.overlay || line.section;
   }
 
   function fitToWidth() {
@@ -106,7 +99,7 @@
               title={`${shot.line} on-screen text`}
               on:click={() => onSeek(shot.start)}
             >
-              <span class="block-line">{overlayFor(shot.line)}</span>
+              <span class="block-line">{shot.overlayText}</span>
             </button>
           {/each}
         </div>
