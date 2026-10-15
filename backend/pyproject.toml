@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Local pipeline engine for UlasApp review videos"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi[standard]>=0.115",
+    # Plain fastapi rather than fastapi[standard]: the extras exist for the fastapi CLI, which this
+    # engine never uses (the sidecar runs uvicorn itself), and they pull in the cloud CLI and its
+    # telemetry SDK. uvicorn[standard] is listed here because that extra used to provide it.
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.20",
     "sqlmodel>=0.0.24",
     "pydantic-settings>=2.4",

@@ -107,8 +107,13 @@ to MP4 by [HyperFrames](https://hyperframes.heygen.com).
 ```bat
 :: terminal 1 - engine
 cd backend
+uv sync --frozen            :: installs the locked toolchain and dependencies (uv is bundled in the venv
+                           :: after the first sync; without uv locally, use the pip line below)
+.venv\Scripts\python -m app.sidecar --port 8765
+
+:: without uv
 python -m venv .venv
-.venv\Scripts\pip install "fastapi[standard]" sqlmodel pydantic-settings httpx python-multipart
+.venv\Scripts\pip install "fastapi>=0.115" "uvicorn[standard]>=0.30" sqlmodel pydantic-settings httpx python-multipart
 .venv\Scripts\python -m app.sidecar --port 8765
 
 :: terminal 2 - frontend
