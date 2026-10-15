@@ -11,6 +11,7 @@ from pathlib import Path
 from app.core import media
 from app.services import llm
 from app.services.llm import LLMError
+from app.services.state import AssetRecord, Scene
 
 FRAME_WIDTH = 512
 MAX_FRAMES = 3
@@ -45,10 +46,10 @@ def clean_description(answer: str) -> str:
     return text
 
 
-def frame_moments(asset: dict) -> list[float]:
+def frame_moments(asset: AssetRecord) -> list[float]:
     """Where to sample a clip: the middle of up to three scenes, spread over its length."""
     duration = float(asset.get("duration") or 0.0)
-    scenes = asset.get("scenes") or [{"start": 0.0, "end": duration}]
+    scenes: list[Scene] = asset.get("scenes") or [{"start": 0.0, "end": duration}]
     if len(scenes) <= MAX_FRAMES:
         chosen = scenes
     else:
@@ -62,7 +63,7 @@ def frame_moments(asset: dict) -> list[float]:
     return moments or [round(duration / 2, 3)]
 
 
-async def describe_asset(directory: Path, asset: dict) -> str:
+async def describe_asset(directory: Path, asset: AssetRecord) -> str:
     """One short description of one stored asset, written with the configured vision model.
 
     Stills are downscaled to the same width as clip frames before they are sent: a full-size photo
@@ -87,7 +88,7 @@ async def _frame(directory: Path, source: Path, asset_id: str, index: int, at: f
     return target
 
 
-async def _clip_frames(directory: Path, asset: dict, source: Path) -> list[Path]:
+async def _clip_frames(directory: Path, asset: AssetRecord, source: Path) -> list[Path]:
     frames = [
         await _frame(directory, source, asset["id"], index, moment)
         for index, moment in enumerate(frame_moments(asset))

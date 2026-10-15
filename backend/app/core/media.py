@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from typing import TypedDict
 
 INSPECT_TIMEOUT_SECONDS = 60
 ANALYSIS_TIMEOUT_SECONDS = 900
@@ -19,16 +20,25 @@ ENCODE_TIMEOUT_SECONDS = 300
 SCENE_TIME_PATTERN = re.compile(r"^lavfi\.scd\.time=([0-9.]+)\s*$", re.MULTILINE)
 
 
+class MediaInfo(TypedDict):
+    """The probe facts the pipeline needs about one stored file."""
+
+    width: int
+    height: int
+    codec: str
+    duration: float | None
+
+
 class MediaError(RuntimeError):
     """Raised when a media file cannot be inspected or prepared."""
 
 
-def _failure(action: str, proc: subprocess.CompletedProcess) -> MediaError:
+def _failure(action: str, proc: subprocess.CompletedProcess[str]) -> MediaError:
     tail = ((proc.stderr or "") + (proc.stdout or "")).strip()[-400:]
     return MediaError(f"{action} failed: {tail or 'no output'}")
 
 
-def parse_probe(text: str) -> dict:
+def parse_probe(text: str) -> MediaInfo:
     """Reduce ffprobe JSON output to the fields the pipeline needs."""
     try:
         data = json.loads(text)
@@ -40,6 +50,8 @@ def parse_probe(text: str) -> dict:
         raise MediaError("the file has no video stream")
     duration = None
     for raw in ((data.get("format") or {}).get("duration"), video.get("duration")):
+        if raw is None:
+            continue
         try:
             value = float(raw)
         except (TypeError, ValueError):
@@ -55,7 +67,7 @@ def parse_probe(text: str) -> dict:
     }
 
 
-def probe(path: Path) -> dict:
+def probe(path: Path) -> MediaInfo:
     """Inspect one media file. Stills and clips both report a video stream."""
     proc = subprocess.run(
         [

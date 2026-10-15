@@ -9,6 +9,11 @@ Token names are the contract between this module and the composition template. E
 token, so the template never has to fall back; `tests/services/test_tones.py` holds that promise.
 """
 
+from typing import TYPE_CHECKING, Any, TypedDict
+
+if TYPE_CHECKING:
+    from app.services.state import Style
+
 DEFAULT_TONE = "bersih"
 DEFAULT_ENERGY = "normal"
 DEFAULT_BADGE = "pill"
@@ -27,7 +32,16 @@ ENERGY_SCALE: dict[str, dict[str, float]] = {
 # bottom card, `plate` is a solid accent block.
 TREATMENTS = ("hero", "card", "plate")
 
-TONES: dict[str, dict] = {
+
+class Tone(TypedDict):
+    """One tone preset: its UI copy plus the token map the composition template reads."""
+
+    label: str
+    character: str
+    tokens: dict[str, str]
+
+
+TONES: dict[str, Tone] = {
     "bersih": {
         "label": "Bersih",
         "character": "Netral dan rapi: teks tebal sedang, gerak tenang.",
@@ -167,7 +181,7 @@ class ToneError(ValueError):
     """Raised when a style block asks for a tone, energy or badge that does not exist."""
 
 
-def treat(tokens: dict, position: str) -> str:
+def treat(tokens: dict[str, str], position: str) -> str:
     """The treatment for the first, middle or last beat of a video."""
     if position == "first":
         return tokens["treat_first"]
@@ -176,25 +190,24 @@ def treat(tokens: dict, position: str) -> str:
     return tokens["treat_middle"]
 
 
-def resolve(style: dict | None) -> dict:
+def resolve(style: "Style | None") -> dict[str, str]:
     """Final tokens for a project: the chosen tone, with the user's overrides applied.
 
     A missing or empty style block falls back to the default tone, so projects created before the
     style system existed still render.
     """
-    style = style or {}
-    name = style.get("tone") or DEFAULT_TONE
+    name = (style.get("tone") if style else None) or DEFAULT_TONE
     if name not in TONES:
         raise ToneError(f"unknown tone '{name}'")
-    energy = style.get("energy") or DEFAULT_ENERGY
+    energy = (style.get("energy") if style else None) or DEFAULT_ENERGY
     if energy not in ENERGIES:
         raise ToneError(f"unknown energy '{energy}'")
-    badge = style.get("badge") or DEFAULT_BADGE
+    badge = (style.get("badge") if style else None) or DEFAULT_BADGE
     if badge not in BADGES:
         raise ToneError(f"unknown badge style '{badge}'")
 
-    tokens = dict(TONES[name]["tokens"])
-    accent = style.get("accent")
+    tokens: dict[str, str] = dict(TONES[name]["tokens"])
+    accent = style.get("accent") if style else None
     if accent:
         tokens["accent"] = accent
 
@@ -242,7 +255,7 @@ def _is_hex(color: str) -> bool:
     return len(value) == 6 and all(char in "0123456789abcdefABCDEF" for char in value)
 
 
-def catalog() -> list[dict]:
+def catalog() -> list[dict[str, Any]]:
     """What the Style panel shows: names, characters and the colours for a small preview."""
     return [
         {

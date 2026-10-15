@@ -2,13 +2,31 @@
 
 from itertools import pairwise
 from pathlib import Path
+from typing import TypedDict
 
 from app.core.config import get_settings
 from app.services.shotlist import FREEZE_EPSILON, MODE_FREEZE, MODE_PHOTO
-from app.services.state import HOOK_SECTION, QA_FILE, StageError, write_json
+from app.services.state import (
+    HOOK_SECTION,
+    QA_FILE,
+    AssetRecord,
+    Shot,
+    StageContext,
+    StageError,
+    TimelineLine,
+    write_json,
+)
 
 
-def _shot_plan_check(shots: list[dict], lines: list[dict], total: float) -> dict:
+class QaCheck(TypedDict):
+    """One check's outcome, as stored in qa.json and shown to the user."""
+
+    name: str
+    passed: bool
+    detail: str
+
+
+def _shot_plan_check(shots: list[Shot], lines: list[TimelineLine], total: float) -> QaCheck:
     """Every script line has exactly one shot and the shots cover the timeline end to end."""
     assigned = [shot["line"] for shot in shots]
     expected = [line["id"] for line in lines]
@@ -40,7 +58,9 @@ def _shot_plan_check(shots: list[dict], lines: list[dict], total: float) -> dict
     }
 
 
-def _shot_material_check(shots: list[dict], assets: dict[str, dict], directory: Path) -> dict:
+def _shot_material_check(
+    shots: list[Shot], assets: dict[str, AssetRecord], directory: Path
+) -> QaCheck:
     """Every shot points at a known asset whose window fits the stored source file."""
     problems: list[str] = []
     for shot in shots:
@@ -70,7 +90,7 @@ def _shot_material_check(shots: list[dict], assets: dict[str, dict], directory: 
     }
 
 
-def _reading_time_check(lines: list[dict], settle: float, per_word: float) -> dict:
+def _reading_time_check(lines: list[TimelineLine], settle: float, per_word: float) -> QaCheck:
     """Every card stays up long enough to be read, judged by how much text it carries.
 
     A floor on card time (checked separately) says nothing about a card carrying a long sentence:
@@ -94,7 +114,7 @@ def _reading_time_check(lines: list[dict], settle: float, per_word: float) -> di
     }
 
 
-def _hook_card_time_check(lines: list[dict], minimum: float) -> dict:
+def _hook_card_time_check(lines: list[TimelineLine], minimum: float) -> QaCheck:
     """The opening card holds longer than the rest: a viewer has not committed to this video yet.
 
     The spine gives the hook that floor, so a failure means the spine was retuned or a script came
@@ -115,16 +135,21 @@ def _hook_card_time_check(lines: list[dict], minimum: float) -> dict:
     }
 
 
-async def run(ctx: dict) -> None:
+async def run(ctx: StageContext) -> None:
     settings = get_settings()
     directory = Path(ctx["dir"])
     state = ctx["state"]
-    timeline = state.get("timeline") or {}
-    lines = timeline.get("lines") or []
-    shots = (state.get("shotlist") or {}).get("shots") or []
-    assets = {asset["id"]: asset for asset in state["inputs"].get("assets") or []}
-    checks: list[dict] = []
+    timeline = state.get("timeline")
+    lines = timeline.get("lines") if timeline else None
+    shotlist = state.get("shotlist")
+    shots = shotlist.get("shots") if shotlist else None
+    inputs = state["inputs"]
+    assets: dict[str, AssetRecord] = {asset["id"]: asset for asset in (inputs.get("assets") or [])}
+    checks: list[QaCheck] = []
 
+    lines = lines or []
+    shots = shots or []
+    total: float | int = timeline.get("total") if timeline else 0
     coverage = bool(lines) and abs(lines[0]["start"]) < 0.011
     for current, nxt in pairwise(lines):
         if nxt["start"] - current["end"] > 0.011:
@@ -134,7 +159,7 @@ async def run(ctx: dict) -> None:
         {
             "name": "timeline_coverage",
             "passed": coverage,
-            "detail": f"{len(lines)} lines, total {timeline.get('total', 0)}s",
+            "detail": f"{len(lines)} lines, total {total}s",
         }
     )
 
@@ -150,13 +175,14 @@ async def run(ctx: dict) -> None:
     )
 
     checks.append(_hook_card_time_check(lines, settings.hook_min_card_seconds))
-    checks.append(_shot_plan_check(shots, lines, float(timeline.get("total") or 0.0)))
+    checks.append(_shot_plan_check(shots, lines, float(total or 0.0)))
     checks.append(_shot_material_check(shots, assets, directory))
     checks.append(
         _reading_time_check(lines, settings.read_settle_seconds, settings.read_seconds_per_word)
     )
 
-    video_rel = state.get("outputs", {}).get("video", "output/video.mp4")
+    outputs = state.get("outputs")
+    video_rel = (outputs.get("video") if outputs else None) or "output/video.mp4"
     video = directory / video_rel
     video_ok = video.exists() and video.stat().st_size > 0
     size = video.stat().st_size if video_ok else 0

@@ -10,7 +10,27 @@ Labels are UI copy (English, like the rest of the interface); the prompt fragmen
 and stay in Indonesian, because that is the language of the script they produce.
 """
 
-BEATS: dict[str, dict] = {
+from typing import TypedDict
+
+
+class BeatSpec(TypedDict):
+    """One beat of the locked library: its label, prompt fragment, word budget and repeat rule."""
+
+    label: str
+    prompt: str
+    max_words: int
+    once_only: bool
+
+
+class Shape(TypedDict):
+    """One preset shape: UI copy plus the saved beat list it stands for."""
+
+    label: str
+    character: str
+    beats: list[str]
+
+
+BEATS: dict[str, BeatSpec] = {
     "hook": {
         "label": "Hook",
         "prompt": "Pembuka yang berdiri sendiri dan bikin penonton berhenti scroll.",
@@ -79,7 +99,7 @@ BEATS: dict[str, dict] = {
     },
 }
 
-SHAPES: dict[str, dict] = {
+SHAPES: dict[str, Shape] = {
     "ulasan": {
         "label": "Ulasan",
         "character": "Alur review klasik: masalah dulu, lalu produk menjawabnya.",

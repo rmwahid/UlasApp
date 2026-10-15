@@ -10,12 +10,12 @@ from app.core import media
 from app.core.config import get_settings
 from app.services import describe
 from app.services.llm import LLMError
-from app.services.state import StageError
+from app.services.state import AssetRecord, StageContext, StageError
 
 DESCRIBE_ATTEMPTS = 3
 
 
-async def _describe_one(directory: Path, asset: dict) -> str:
+async def _describe_one(directory: Path, asset: AssetRecord) -> str:
     """Describe one asset, retrying empty answers; this model reasons and can answer nothing."""
     reason = "no attempt ran"
     for _ in range(DESCRIBE_ATTEMPTS):
@@ -26,11 +26,12 @@ async def _describe_one(directory: Path, asset: dict) -> str:
     raise StageError(f"{asset['name']}: {reason}")
 
 
-async def run(ctx: dict) -> None:
+async def run(ctx: StageContext) -> None:
     settings = get_settings()
     state = ctx["state"]
     directory = Path(ctx["dir"])
-    assets = state["inputs"].get("assets") or []
+    inputs = state["inputs"]
+    assets: list[AssetRecord] = inputs.get("assets") or []
     if not assets:
         raise StageError("No material was uploaded for this project.")
     if not settings.llm_api_key or not settings.llm_model:

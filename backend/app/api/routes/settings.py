@@ -1,9 +1,11 @@
 """Settings endpoints: read merged settings, persist overrides in the data directory."""
 
+from typing import Any
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.core.config import get_settings, save_overrides
+from app.core.config import Settings, get_settings, save_overrides
 
 router = APIRouter()
 
@@ -16,7 +18,7 @@ class SettingsUpdate(BaseModel):
     render_runner: str | None = None
 
 
-def _public(settings) -> dict:
+def _public(settings: Settings) -> dict[str, Any]:
     return {
         "llm_base_url": settings.llm_base_url,
         "llm_model": settings.llm_model,
@@ -27,12 +29,12 @@ def _public(settings) -> dict:
 
 
 @router.get("")
-def read_settings() -> dict:
+def read_settings() -> dict[str, Any]:
     return _public(get_settings())
 
 
 @router.put("")
-def update_settings(payload: SettingsUpdate) -> dict:
+def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
     values = payload.model_dump(exclude_none=True)
     if values:
         save_overrides(values)

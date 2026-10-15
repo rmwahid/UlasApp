@@ -7,7 +7,7 @@ keeping. Nothing is saved here; the user edits the fields and saves them like an
 
 from app.services import llm
 from app.services.llm_json import LLMOutputError, extract_json_object
-from app.services.state import StageError
+from app.services.state import AssetRecord, ProjectState, StageError
 
 SYSTEM_PROMPT = (
     "You write short creative briefs for short-form product review videos in casual Bahasa Indonesia. "
@@ -35,7 +35,7 @@ NOT_DESCRIBED = "(material belum dideskripsikan)"
 MAX_FIELD_CHARS = 400
 
 
-def material_lines(assets: list[dict]) -> str:
+def material_lines(assets: list[AssetRecord]) -> str:
     """The described material, one line each, because the vision text is what the shots show."""
     described = [asset for asset in assets if asset.get("description")]
     if not described:
@@ -52,13 +52,14 @@ def clean_field(value: object) -> str:
     return text[:MAX_FIELD_CHARS]
 
 
-async def draft(state: dict) -> dict:
+async def draft(state: ProjectState) -> dict[str, str]:
     """A proposed brief: the direction and the on-screen facts, for the user to edit."""
-    product = (state.get("inputs") or {}).get("product") or {}
+    inputs = state.get("inputs")
+    product = inputs.get("product") if inputs else None
     prompt = USER_PROMPT_TEMPLATE.format(
-        name=product.get("name") or "produk ini",
-        points=product.get("points") or "(tidak diisi)",
-        material=material_lines((state.get("inputs") or {}).get("assets") or []),
+        name=(product.get("name") if product else None) or "produk ini",
+        points=(product.get("points") if product else None) or "(tidak diisi)",
+        material=material_lines((inputs.get("assets") if inputs else None) or []),
     )
     answer = await llm.complete(SYSTEM_PROMPT, prompt)
     try:

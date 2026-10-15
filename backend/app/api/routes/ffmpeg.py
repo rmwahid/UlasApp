@@ -1,5 +1,7 @@
 """FFmpeg management endpoints backing the Settings screen."""
 
+from typing import Any
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -10,12 +12,12 @@ router = APIRouter()
 
 
 @router.get("")
-def read_status() -> dict:
+def read_status() -> dict[str, Any]:
     return ffmpeg.status()
 
 
 @router.post("/install")
-def install() -> dict:
+def install() -> dict[str, Any]:
     try:
         return ffmpeg.install()
     except FFmpegError as exc:
@@ -23,7 +25,7 @@ def install() -> dict:
 
 
 @router.post("/upgrade")
-def upgrade() -> dict:
+def upgrade() -> dict[str, Any]:
     try:
         return ffmpeg.upgrade()
     except FFmpegError as exc:
@@ -35,7 +37,7 @@ class PathRequest(BaseModel):
 
 
 @router.post("/path")
-def set_path(payload: PathRequest) -> dict:
+def set_path(payload: PathRequest) -> dict[str, Any]:
     try:
         return ffmpeg.set_custom_path(payload.directory)
     except FFmpegError as exc:

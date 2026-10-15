@@ -2,32 +2,36 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.db import engine
 from app.models import Job
 from app.services import events
 from app.services.stages import compose, describe, qa, script, visual
-from app.services.state import read_state, write_state
+from app.services.state import StageContext, read_state, write_state
 
 logger = logging.getLogger("ulasapp.pipeline")
 
-STAGE_MODULES = {
-    "describe": describe,
-    "script": script,
-    "visual": visual,
-    "compose": compose,
-    "qa": qa,
+StageRunner = Callable[[StageContext], Awaitable[None]]
+
+STAGE_MODULES: dict[str, StageRunner] = {
+    "describe": describe.run,
+    "script": script.run,
+    "visual": visual.run,
+    "compose": compose.run,
+    "qa": qa.run,
 }
 
-_queue: asyncio.Queue | None = None
-_worker_task: asyncio.Task | None = None
+_queue: asyncio.Queue[str] | None = None
+_worker_task: asyncio.Task[None] | None = None
 _loop: asyncio.AbstractEventLoop | None = None
 
 
-def update_job(job_id: str, **fields) -> None:
+def update_job(job_id: str, **fields: Any) -> None:
     with Session(engine) as session:
         job = session.get(Job, job_id)
         if job is None:
@@ -41,7 +45,7 @@ def update_job(job_id: str, **fields) -> None:
         session.commit()
 
 
-async def run_stages(ctx: dict, stage_names=None) -> None:
+async def run_stages(ctx: StageContext, stage_names: list[str] | None = None) -> None:
     state = ctx["state"]
     names = stage_names or list(STAGE_MODULES.keys())
     for name in names:
@@ -54,7 +58,7 @@ async def run_stages(ctx: dict, stage_names=None) -> None:
         update_job(ctx["job_id"], stage=name, status="running")
         events.publish(ctx["job_id"], {"type": "stage", "stage": name, "status": "running"})
         try:
-            await STAGE_MODULES[name].run(ctx)
+            await STAGE_MODULES[name](ctx)
         except Exception as exc:
             stage_state["status"] = "failed"
             stage_state["error"] = str(exc)[:800]
@@ -90,7 +94,7 @@ async def run_job(job_id: str) -> None:
     requested = state.get("run_stages") or None
     update_job(job_id, status="running", error=None)
     events.publish(job_id, {"type": "start", "title": title})
-    ctx = {
+    ctx: StageContext = {
         "job_id": job_id,
         "dir": directory,
         "state": state,
@@ -129,7 +133,7 @@ def start_worker() -> None:
     _loop = asyncio.get_running_loop()
     # Resume: anything left as running/queued from a previous process goes back to the queue.
     with Session(engine) as session:
-        statement = select(Job).where(Job.status.in_(("queued", "running")))
+        statement = select(Job).where(col(Job.status).in_(("queued", "running")))
         stale = session.exec(statement).all()
         for job in stale:
             job.status = "queued"
@@ -161,7 +165,7 @@ class ProjectBusyError(RuntimeError):
 def active_job() -> Job | None:
     """The one project that is currently describing or rendering, if any."""
     with Session(engine) as session:
-        statement = select(Job).where(Job.status.in_(("queued", "running")))
+        statement = select(Job).where(col(Job.status).in_(("queued", "running")))
         job = session.exec(statement).first()
         if job is None:
             return None

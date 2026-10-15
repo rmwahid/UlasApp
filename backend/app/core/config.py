@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -67,7 +68,7 @@ def get_settings() -> Settings:
     return base
 
 
-def save_overrides(values: dict) -> None:
+def save_overrides(values: dict[str, Any]) -> None:
     """Persist a subset of settings as JSON overrides in the data directory."""
     base = Settings()
     base.data_dir.mkdir(parents=True, exist_ok=True)

@@ -20,6 +20,7 @@ import threading
 from glob import glob
 from pathlib import Path
 from shutil import which
+from typing import Any
 
 from app.core.config import get_settings, save_overrides
 
@@ -142,7 +143,7 @@ def _refresh_detection() -> str | None:
     return str(Path(probe).parent) if probe else None
 
 
-def status() -> dict:
+def status() -> dict[str, Any]:
     ensure_ffmpeg_on_path()
     directory: str | None = None
     source: str | None = None
@@ -157,8 +158,8 @@ def status() -> dict:
             directory = str(Path(probe).parent)
             source = "path"
     found = directory is not None
-    version = None
-    if found:
+    version: str | None = None
+    if directory is not None:
         try:
             proc = subprocess.run(
                 ["ffprobe", "-version"],
@@ -171,21 +172,21 @@ def status() -> dict:
             version = match.group(1) if match else None
         except (OSError, subprocess.TimeoutExpired):
             version = None
-    result = {
+    result: dict[str, Any] = {
         "found": found,
         "path": directory,
         "source": source,
-        "on_path": _is_on_path(directory) if found else False,
+        "on_path": _is_on_path(directory) if directory is not None else False,
         "version": version,
         "winget_available": which("winget") is not None,
         "upgrade_available": None,
     }
-    if found and result["winget_available"]:
+    if result["winget_available"] and found:
         result["upgrade_available"] = _winget_upgrade_available()
     return result
 
 
-def install() -> dict:
+def install() -> dict[str, Any]:
     with _INSTALL_LOCK:
         output = _winget_install()
         _refresh_detection()
@@ -197,7 +198,7 @@ def install() -> dict:
         return result
 
 
-def upgrade() -> dict:
+def upgrade() -> dict[str, Any]:
     with _INSTALL_LOCK:
         output = _winget_upgrade()
         _refresh_detection()
@@ -209,7 +210,7 @@ def upgrade() -> dict:
         return result
 
 
-def set_custom_path(directory: str) -> dict:
+def set_custom_path(directory: str) -> dict[str, Any]:
     directory = directory.strip().strip('"')
     if not _has_ffprobe(directory):
         raise FFmpegError(f"ffprobe.exe not found in: {directory}")

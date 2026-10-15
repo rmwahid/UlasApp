@@ -1,13 +1,14 @@
 """Reading a JSON object out of a model answer, with the fences models like to add."""
 
 import json
+from typing import Any
 
 
 class LLMOutputError(ValueError):
     """Raised when a model answer does not contain a usable JSON object."""
 
 
-def extract_json_object(text: str) -> dict:
+def extract_json_object(text: str) -> dict[str, Any]:
     """Return the first JSON object in `text`, ignoring code fences and surrounding prose."""
     cleaned = text.strip()
     start = cleaned.find("{")

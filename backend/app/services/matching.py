@@ -9,6 +9,7 @@ because of this step.
 from app.services import llm
 from app.services.llm import LLMError
 from app.services.llm_json import LLMOutputError, extract_json_object
+from app.services.state import AssetRecord, TimelineLine
 
 MAX_NOTES_CHARS = 300
 
@@ -38,7 +39,7 @@ ORIENTATION_LANDSCAPE = "landscape"
 ORIENTATION_SQUARE = "square"
 
 
-def orientation(asset: dict) -> str:
+def orientation(asset: AssetRecord) -> str:
     width = int(asset.get("width") or 0)
     height = int(asset.get("height") or 0)
     if width <= 0 or height <= 0:
@@ -50,7 +51,7 @@ def orientation(asset: dict) -> str:
     return ORIENTATION_SQUARE
 
 
-def _asset_lines(assets: list[dict]) -> str:
+def _asset_lines(assets: list[AssetRecord]) -> str:
     rows = []
     for asset in assets:
         seconds = asset.get("duration")
@@ -62,7 +63,7 @@ def _asset_lines(assets: list[dict]) -> str:
     return "\n".join(rows)
 
 
-def _line_rows(lines: list[dict]) -> str:
+def _line_rows(lines: list[TimelineLine]) -> str:
     rows = []
     for line in lines:
         hint = line.get("hint") or "none"
@@ -70,11 +71,13 @@ def _line_rows(lines: list[dict]) -> str:
     return "\n".join(rows)
 
 
-def build_prompt(lines: list[dict], assets: list[dict]) -> str:
+def build_prompt(lines: list[TimelineLine], assets: list[AssetRecord]) -> str:
     return USER_TEMPLATE.format(assets=_asset_lines(assets), lines=_line_rows(lines))
 
 
-def read_assignment(answer: str, lines: list[dict], assets: list[dict]) -> tuple[dict, str]:
+def read_assignment(
+    answer: str, lines: list[TimelineLine], assets: list[AssetRecord]
+) -> tuple[dict[str, str], str]:
     """Validate a model answer into {line id: asset id}, dropping anything unusable."""
     parsed = extract_json_object(answer)
     known_lines = {line["id"] for line in lines}
@@ -85,13 +88,20 @@ def read_assignment(answer: str, lines: list[dict], assets: list[dict]) -> tuple
             continue
         line_id = entry.get("line")
         asset_id = entry.get("asset")
-        if line_id in known_lines and asset_id in known_assets:
+        if (
+            isinstance(line_id, str)
+            and isinstance(asset_id, str)
+            and line_id in known_lines
+            and asset_id in known_assets
+        ):
             assignment[line_id] = asset_id
     notes = " ".join(str(parsed.get("notes") or "").split())[:MAX_NOTES_CHARS]
     return assignment, notes
 
 
-async def assign(lines: list[dict], assets: list[dict]) -> tuple[dict, str, str]:
+async def assign(
+    lines: list[TimelineLine], assets: list[AssetRecord]
+) -> tuple[dict[str, str], str, str]:
     """Ask the model for an assignment.
 
     Returns (assignment, notes, reason). An empty assignment with a reason means the pipeline
@@ -121,7 +131,9 @@ MATCH_ATTEMPTS = 2
 SNIPPET_CHARS = 160
 
 
-async def _request(lines: list[dict], assets: list[dict]) -> tuple[dict, str, str]:
+async def _request(
+    lines: list[TimelineLine], assets: list[AssetRecord]
+) -> tuple[dict[str, str], str, str]:
     """(assignment, notes, failure): a failure means no usable answer survived the attempts."""
     failure = ""
     for _ in range(MATCH_ATTEMPTS):

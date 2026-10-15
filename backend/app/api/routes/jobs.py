@@ -8,12 +8,14 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core import media
 from app.core.config import get_settings
@@ -25,7 +27,15 @@ from app.services.events import subscribe, unsubscribe
 from app.services.pipeline import ProjectBusyError
 from app.services.state import (
     SHOTLIST_FILE,
+    AssetRecord,
+    Brief,
+    Inputs,
+    ProjectState,
+    Shotlist,
     StageError,
+    Style,
+    TimelineLine,
+    VersionRecord,
     default_style,
     initial_state,
     project_dir,
@@ -63,18 +73,19 @@ def _get_job(job_id: str) -> Job:
         return job
 
 
-def _asset_records(state: dict) -> list[dict]:
+def _asset_records(state: ProjectState) -> list[AssetRecord]:
     """Stored material records, including projects created before multi-asset input."""
-    assets = state.get("inputs", {}).get("assets")
+    inputs: Inputs = state.get("inputs") or {}
+    assets = inputs.get("assets")
     if assets:
         return list(assets)
-    single = state.get("inputs", {}).get("photo")
+    single = inputs.get("photo")
     if not single:
         return []
     return [{"id": "a01", "kind": "photo", "path": single, "name": Path(single).name, "hero": True}]
 
 
-def _asset_entries(job_id: str, state: dict) -> list[dict]:
+def _asset_entries(job_id: str, state: ProjectState) -> list[dict[str, Any]]:
     """Material list as the UI needs it: names, kind, and where to fetch the images."""
     return [
         {
@@ -92,20 +103,24 @@ def _asset_entries(job_id: str, state: dict) -> list[dict]:
     ]
 
 
-def _stored_asset(state: dict, asset_id: str) -> dict | None:
+def _stored_asset(state: ProjectState, asset_id: str) -> AssetRecord | None:
     return next((asset for asset in _asset_records(state) if asset["id"] == asset_id), None)
 
 
-def _upgrade_inputs(state: dict) -> list[dict]:
+def _upgrade_inputs(state: ProjectState) -> list[AssetRecord]:
     """Material records for editing, upgrading a photo-only project to the asset list."""
     assets = _asset_records(state)
-    if assets and not state.get("inputs", {}).get("assets"):
-        state.setdefault("inputs", {})["assets"] = assets
+    inputs: Inputs | None = state.get("inputs")
+    if assets and (inputs is None or not inputs.get("assets")):
+        if inputs is None:
+            inputs = {}
+            state["inputs"] = inputs
+        inputs["assets"] = assets
     return assets
 
 
-async def _store_assets(directory: Path, files: list[UploadFile]) -> list[dict]:
-    records: list[dict] = []
+async def _store_assets(directory: Path, files: list[UploadFile]) -> list[AssetRecord]:
+    records: list[AssetRecord] = []
     for index, upload in enumerate(files):
         kind, extension = uploads.classify(upload.filename or "")
         target = directory / uploads.asset_path(index, extension)
@@ -137,7 +152,7 @@ async def create_job(
     hero: int = Form(default=0),
     assets: list[UploadFile] = File(...),
     music: UploadFile | None = File(None),
-) -> dict:
+) -> dict[str, str]:
     """Create a project from its material. Nothing renders until the user asks for it.
 
     The flow this serves: pick the material, have the vision model describe it (stage `describe`),
@@ -162,7 +177,7 @@ async def create_job(
         shutil.rmtree(directory, ignore_errors=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     records[hero if 0 <= hero < len(records) else 0]["hero"] = True
-    inputs: dict = {"assets": records, "product": {"name": product_name, "points": points}}
+    inputs: Inputs = {"assets": records, "product": {"name": product_name, "points": points}}
     if music_rel:
         inputs["music"] = music_rel
     job = Job(id=job_id, title=title, project_dir=str(directory))
@@ -194,7 +209,7 @@ def _start(job_id: str, stages: list[str]) -> None:
 
 
 @router.post("/{job_id}/describe")
-def start_describe(job_id: str) -> dict:
+def start_describe(job_id: str) -> dict[str, str]:
     """Describe the material with the vision model, so the user can check it before rendering."""
     _get_job(job_id)
     _start(job_id, ["describe"])
@@ -207,7 +222,7 @@ class BriefUpdate(BaseModel):
 
 
 @router.post("/{job_id}/render")
-def start_render(job_id: str, payload: BriefUpdate | None = None) -> dict:
+def start_render(job_id: str, payload: BriefUpdate | None = None) -> dict[str, Any]:
     """Start a render with the brief the user filled in, and report what it has to redo."""
     job = _get_job(job_id)
     if job.status in ("queued", "running"):
@@ -225,22 +240,27 @@ def start_render(job_id: str, payload: BriefUpdate | None = None) -> dict:
     return {"started": "render", "stages": stages}
 
 
-def _render_stages(state: dict) -> list[str]:
+def _render_stages(state: ProjectState) -> list[str]:
     """What a generate redoes.
 
     The script is only written again when the product details or the brief changed, and the shot
     plan only when it does not exist yet or the lines changed, so a storyboard the user approved
     survives generating another version. Compose and QA always run: a new version means a new file.
     """
-    script_current = (
-        state.get("script_fingerprint")
-        and state["script_fingerprint"] == script_fingerprint(state)
-        and (state.get("stages") or {}).get("script", {}).get("status") == "done"
+    stages_state = state.get("stages")
+    script_stage = stages_state.get("script") if stages_state else None
+    stored = state.get("script_fingerprint")
+    script_current = bool(
+        stored
+        and stored == script_fingerprint(state)
+        and script_stage is not None
+        and script_stage.get("status") == "done"
     )
     stages: list[str] = []
     if not script_current:
         stages.append("script")
-    if stages or not (state.get("shotlist") or {}).get("shots"):
+    shotlist_state = state.get("shotlist")
+    if stages or not (shotlist_state and shotlist_state.get("shots")):
         stages.append("visual")
     return [*stages, "compose", "qa"]
 
@@ -250,23 +270,32 @@ def _save_brief(job: Job, payload: BriefUpdate) -> None:
     state = read_state(directory)
     if not state:
         raise HTTPException(status_code=404, detail="Project state is missing")
-    values = payload.model_dump(exclude_none=True)
-    state["brief"] = {**(state.get("brief") or {}), **values}
+    current = state.get("brief")
+    direction = current.get("direction") if current else ""
+    overlay_style = current.get("overlay_style") if current else ""
+    brief: Brief = {
+        "direction": payload.direction if payload.direction is not None else direction,
+        "overlay_style": (
+            payload.overlay_style if payload.overlay_style is not None else overlay_style
+        ),
+    }
+    state["brief"] = brief
     write_state(directory, state)
 
 
 @router.patch("/{job_id}/brief")
-def update_brief(job_id: str, payload: BriefUpdate) -> dict:
+def update_brief(job_id: str, payload: BriefUpdate) -> dict[str, Any]:
     """Save the brief the user typed, so the next generate uses it."""
     job = _get_job(job_id)
     if job.status in ("queued", "running"):
         raise HTTPException(status_code=409, detail="This project is still working")
     _save_brief(job, payload)
-    return read_state(Path(job.project_dir)).get("brief", {})
+    brief = read_state(Path(job.project_dir)).get("brief")
+    return dict(brief) if brief is not None else {}
 
 
 @router.post("/{job_id}/brief/draft")
-async def draft_brief(job_id: str) -> dict:
+async def draft_brief(job_id: str) -> dict[str, str]:
     """Propose a brief from the product facts and the material, for the user to edit before saving."""
     job = _get_job(job_id)
     if job.status in ("queued", "running"):
@@ -294,7 +323,7 @@ class StyleUpdate(BaseModel):
 HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
-def _style_catalog() -> dict:
+def _style_catalog() -> dict[str, Any]:
     """Everything the Style panel needs to draw itself: presets, the beat library and the options."""
     return {
         "tones": tones.catalog(),
@@ -325,7 +354,7 @@ def _style_catalog() -> dict:
 
 
 @router.patch("/{job_id}/style")
-def update_style(job_id: str, payload: StyleUpdate) -> dict:
+def update_style(job_id: str, payload: StyleUpdate) -> dict[str, Any]:
     """Save the shape, tone and overrides, refusing anything the composition could not render."""
     job = _get_job(job_id)
     if job.status in ("queued", "running"):
@@ -334,28 +363,47 @@ def update_style(job_id: str, payload: StyleUpdate) -> dict:
     state = read_state(directory)
     if not state:
         raise HTTPException(status_code=404, detail="Project state is missing")
-    style = {**default_style(), **(state.get("style") or {})}
-    changes = payload.model_dump(exclude_none=True)
-    accent = changes.get("accent")
+    defaults = default_style()
+    stored = state.get("style")
+    style: Style = {
+        "shape": (stored.get("shape") if stored else None) or defaults["shape"],
+        "beats": (stored.get("beats") if stored else None) or defaults["beats"],
+        "tone": (stored.get("tone") if stored else None) or defaults["tone"],
+        "accent": stored.get("accent") if stored else None,
+        "energy": (stored.get("energy") if stored else None) or defaults["energy"],
+        "badge": (stored.get("badge") if stored else None) or defaults["badge"],
+    }
+    if payload.shape is not None:
+        style["shape"] = payload.shape
+    if payload.beats is not None:
+        style["beats"] = payload.beats
+    if payload.tone is not None:
+        style["tone"] = payload.tone
+    if payload.accent is not None:
+        style["accent"] = payload.accent
+    if payload.energy is not None:
+        style["energy"] = payload.energy
+    if payload.badge is not None:
+        style["badge"] = payload.badge
+    accent = payload.accent
     if accent and not HEX_COLOR.match(accent):
         raise HTTPException(status_code=422, detail="accent must be a hex colour like #f5b52e")
-    style.update(changes)
     try:
         beats.resolve_beats(style.get("shape") or beats.DEFAULT_SHAPE, style.get("beats"))
         tones.resolve(style)
     except (beats.BeatError, tones.ToneError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    stored = state.get("script_fingerprint")
+    stored_fingerprint = state.get("script_fingerprint")
     state["style"] = style
     write_state(directory, state)
     return {
         "style": style,
-        "script_exists": bool(stored),
+        "script_exists": bool(stored_fingerprint),
         "script_rewrites": _script_rewrite_needed(state, style),
     }
 
 
-def _script_rewrite_needed(previous: dict, style: dict) -> bool:
+def _script_rewrite_needed(previous: ProjectState, style: Style) -> bool:
     """Whether this change means the next generate writes the script again.
 
     The stored fingerprint is what the current script was written from, so comparing it with the
@@ -365,7 +413,8 @@ def _script_rewrite_needed(previous: dict, style: dict) -> bool:
     stored = previous.get("script_fingerprint")
     if not stored:
         return False
-    return stored != script_fingerprint({**previous, "style": style})
+    updated: ProjectState = {**previous, "style": style}
+    return stored != script_fingerprint(updated)
 
 
 class AssetUpdate(BaseModel):
@@ -373,7 +422,7 @@ class AssetUpdate(BaseModel):
 
 
 @router.patch("/{job_id}/assets/{asset_id}")
-def update_asset(job_id: str, asset_id: str, payload: AssetUpdate) -> dict:
+def update_asset(job_id: str, asset_id: str, payload: AssetUpdate) -> dict[str, Any]:
     """Save an edited asset description: the user's words beat the model's."""
     job = _get_job(job_id)
     if job.status in ("queued", "running"):
@@ -392,7 +441,7 @@ def update_asset(job_id: str, asset_id: str, payload: AssetUpdate) -> dict:
 
 
 @router.post("/{job_id}/reveal")
-def reveal_folder(job_id: str) -> dict:
+def reveal_folder(job_id: str) -> dict[str, str]:
     """Open the project folder in the file manager so the user can take the video."""
     job = _get_job(job_id)
     directory = Path(job.project_dir)
@@ -414,11 +463,11 @@ def reveal_folder(job_id: str) -> dict:
 
 
 @router.get("")
-def list_jobs() -> list[dict]:
+def list_jobs() -> list[dict[str, Any]]:
     """The project list: newest first, with enough to show what state each one is in."""
     with Session(engine) as session:
-        jobs = session.exec(select(Job).order_by(Job.created_at.desc())).all()
-        entries = []
+        jobs = session.exec(select(Job).order_by(col(Job.created_at).desc())).all()
+        entries: list[dict[str, Any]] = []
         for job in jobs:
             state = read_state(Path(job.project_dir))
             entries.append(
@@ -437,11 +486,12 @@ def list_jobs() -> list[dict]:
 
 
 @router.get("/{job_id}")
-def get_job_detail(job_id: str) -> dict:
+def get_job_detail(job_id: str) -> dict[str, Any]:
     job = _get_job(job_id)
     directory = Path(job.project_dir)
     state = read_state(directory)
-    video_rel = state.get("outputs", {}).get("video", "output/video.mp4")
+    outputs = state.get("outputs")
+    video_rel = (outputs.get("video") if outputs else None) or "output/video.mp4"
     video = directory / video_rel
     video_url = None
     poster_url = None
@@ -477,10 +527,10 @@ def get_job_detail(job_id: str) -> dict:
     }
 
 
-def _version_entries(job_id: str, state: dict) -> list[dict]:
+def _version_entries(job_id: str, state: ProjectState) -> list[dict[str, Any]]:
     """Every render of this project, newest first, as the result list needs it."""
-    versions = list(state.get("versions") or [])
-    entries = []
+    versions: list[VersionRecord] = state.get("versions") or []
+    entries: list[dict[str, Any]] = []
     for version in reversed(versions):
         entries.append(
             {
@@ -512,11 +562,11 @@ def job_version(job_id: str, number: int) -> FileResponse:
 
 
 @router.get("/{job_id}/events")
-async def job_events(job_id: str):
+async def job_events(job_id: str) -> StreamingResponse:
     _get_job(job_id)
     queue = subscribe(job_id)
 
-    async def generator():
+    async def generator() -> AsyncIterator[str]:
         try:
             yield f"data: {json.dumps({'type': 'hello', 'job_id': job_id})}\n\n"
             while True:
@@ -531,8 +581,6 @@ async def job_events(job_id: str):
         finally:
             unsubscribe(job_id, queue)
 
-    from fastapi.responses import StreamingResponse
-
     return StreamingResponse(generator(), media_type="text/event-stream")
 
 
@@ -540,7 +588,8 @@ async def job_events(job_id: str):
 def job_video(job_id: str) -> FileResponse:
     job = _get_job(job_id)
     state = read_state(Path(job.project_dir))
-    video_rel = state.get("outputs", {}).get("video", "output/video.mp4")
+    outputs = state.get("outputs")
+    video_rel = (outputs.get("video") if outputs else None) or "output/video.mp4"
     video = Path(job.project_dir) / video_rel
     if not video.exists():
         raise HTTPException(status_code=404, detail="Video not rendered yet")
@@ -557,7 +606,8 @@ async def job_poster(job_id: str) -> FileResponse:
     job = _get_job(job_id)
     directory = Path(job.project_dir)
     state = read_state(directory)
-    video_rel = state.get("outputs", {}).get("video", "output/video.mp4")
+    outputs = state.get("outputs")
+    video_rel = (outputs.get("video") if outputs else None) or "output/video.mp4"
     video = directory / video_rel
     if not video.exists():
         raise HTTPException(status_code=404, detail="Video not rendered yet")
@@ -605,7 +655,7 @@ async def job_asset_thumb(job_id: str, asset_id: str) -> FileResponse:
     return FileResponse(thumb, media_type="image/jpeg")
 
 
-def _thumb_moment(asset: dict) -> float:
+def _thumb_moment(asset: AssetRecord) -> float:
     """A frame from the middle of the first scene, so the still shows real content."""
     scenes = asset.get("scenes") or []
     if scenes:
@@ -613,12 +663,13 @@ def _thumb_moment(asset: dict) -> float:
     return round(float(asset.get("duration") or 0.0) / 2, 3)
 
 
-def _editable_state(job: Job) -> tuple[Path, dict, list[dict], list[dict]]:
+def _editable_state(job: Job) -> tuple[Path, ProjectState, list[TimelineLine], list[AssetRecord]]:
     if job.status in ("queued", "running"):
         raise HTTPException(status_code=409, detail="The job is still running")
     directory = Path(job.project_dir)
     state = read_state(directory)
-    lines = (state.get("timeline") or {}).get("lines") or []
+    timeline = state.get("timeline")
+    lines = timeline.get("lines") if timeline else None
     if not lines:
         raise HTTPException(status_code=409, detail="The script has not been generated yet")
     assets = _upgrade_inputs(state)
@@ -627,7 +678,7 @@ def _editable_state(job: Job) -> tuple[Path, dict, list[dict], list[dict]]:
     return directory, state, lines, assets
 
 
-def _save_shotlist(directory: Path, state: dict, result: dict) -> None:
+def _save_shotlist(directory: Path, state: ProjectState, result: Shotlist) -> None:
     """Store the shot plan. Saving never renders: the user decides when a new version is made."""
     state["shotlist"] = result
     write_state(directory, state)
@@ -635,13 +686,14 @@ def _save_shotlist(directory: Path, state: dict, result: dict) -> None:
 
 
 @router.post("/{job_id}/shotlist")
-def update_shotlist(job_id: str, payload: ShotlistUpdate) -> dict:
+def update_shotlist(job_id: str, payload: ShotlistUpdate) -> dict[str, Any]:
     """Save storyboard edits (asset, overlay text, lock). Render a version when you are ready."""
     job = _get_job(job_id)
     directory, state, lines, assets = _editable_state(job)
     edits = [edit.model_dump() for edit in payload.edits]
+    previous: Shotlist = state.get("shotlist") or {"shots": []}
     try:
-        result = shotlist.apply_edits(state.get("shotlist") or {"shots": []}, lines, assets, edits)
+        result = shotlist.apply_edits(previous, lines, assets, edits)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _save_shotlist(directory, state, result)
@@ -649,7 +701,7 @@ def update_shotlist(job_id: str, payload: ShotlistUpdate) -> dict:
 
 
 @router.post("/{job_id}/shotlist/auto")
-def auto_shotlist(job_id: str) -> dict:
+def auto_shotlist(job_id: str) -> dict[str, Any]:
     """Rebuild the shot plan from the current descriptions, keeping the lines the user locked."""
     job = _get_job(job_id)
     directory, state, lines, assets = _editable_state(job)

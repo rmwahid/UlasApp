@@ -6,7 +6,7 @@ api_router = APIRouter()
 
 
 @api_router.get("/health")
-def health() -> dict:
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 

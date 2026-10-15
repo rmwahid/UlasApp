@@ -6,6 +6,9 @@ result already stored on the asset (`scenes`, `duration`).
 """
 
 from itertools import pairwise
+from typing import Any
+
+from app.services.state import AssetRecord, Scene, Shot, Shotlist, TimelineLine
 
 MIN_SCENE_SECONDS = 0.6
 FREEZE_EPSILON = 0.05
@@ -22,7 +25,7 @@ Window = tuple[int, float]
 Ranges = dict[str, list[tuple[float, float]]]
 
 
-def scene_segments(times: list[float], duration: float) -> list[dict]:
+def scene_segments(times: list[float], duration: float) -> list[Scene]:
     """Turn scene-change times into consecutive segments covering the whole clip.
 
     Slivers shorter than MIN_SCENE_SECONDS are merged into their neighbour, so a shaky
@@ -42,7 +45,7 @@ def scene_segments(times: list[float], duration: float) -> list[dict]:
     return [{"start": start, "end": end} for start, end in pairwise(bounds) if end - start > 0]
 
 
-def shot_windows(asset: dict, slot: float) -> list[Window]:
+def shot_windows(asset: AssetRecord, slot: float) -> list[Window]:
     """Ranked (rank, source start) candidates for covering `slot` seconds of a clip.
 
     rank 0: the window sits inside a single scene, so the shot contains no cut
@@ -73,7 +76,7 @@ def shot_windows(asset: dict, slot: float) -> list[Window]:
     return sorted((rank, start) for start, rank in candidates.items())
 
 
-def pick_window(asset: dict, slot: float, used: Ranges) -> tuple[str, float]:
+def pick_window(asset: AssetRecord, slot: float, used: Ranges) -> tuple[str, float]:
     """Best (mode, source start) for covering `slot` seconds of a clip.
 
     Rank decides first because it encodes whether the shot needs padding or crosses a cut;
@@ -90,13 +93,13 @@ def pick_window(asset: dict, slot: float, used: Ranges) -> tuple[str, float]:
 
 
 def build_shotlist(
-    lines: list[dict],
-    assets: list[dict],
-    previous: dict | None = None,
+    lines: list[TimelineLine],
+    assets: list[AssetRecord],
+    previous: Shotlist | None = None,
     assignment: dict[str, str] | None = None,
     matched_by: str = "rotation",
     notes: str = "",
-) -> dict:
+) -> Shotlist:
     """Assign one shot per script line.
 
     When `assignment` is given it decides the picture for every unlocked line (it is what the model
@@ -111,8 +114,10 @@ def build_shotlist(
     pool = _rotation(assets)
     if not lines or not pool:
         return {"shots": [], "matched_by": matched_by, "notes": notes}
-    by_id = {asset["id"]: asset for asset in pool}
-    previous_shots = {shot["line"]: shot for shot in (previous or {}).get("shots", [])}
+    by_id: dict[str, AssetRecord] = {asset["id"]: asset for asset in pool}
+    previous_shots: dict[str, Shot] = (
+        {shot["line"]: shot for shot in previous.get("shots", [])} if previous else {}
+    )
     locked = {
         line: shot
         for line, shot in previous_shots.items()
@@ -126,7 +131,7 @@ def build_shotlist(
     fallback_pool = [asset for asset in pool if asset["id"] not in set(chosen.values())] or pool
     used: Ranges = {}
     cursor = _Cursor(fallback_pool)
-    shots: list[dict] = []
+    shots: list[Shot] = []
     for index, line in enumerate(lines, start=1):
         slot = _slot(line)
         prior = locked.get(line["id"])
@@ -136,14 +141,17 @@ def build_shotlist(
             source_start = prior.get("source_start")
             cursor.remember(asset["id"])
         else:
-            asset = by_id.get(chosen.get(line["id"])) or cursor.take()
+            picked = chosen.get(line["id"])
+            next_asset = by_id.get(picked) if picked is not None else None
+            asset = next_asset if next_asset is not None else cursor.take()
             if asset.get("kind") == "clip":
                 mode, source_start = pick_window(asset, slot, used)
             else:
                 mode, source_start = MODE_PHOTO, None
         if mode == MODE_TRIM and source_start is not None:
             _remember(used, asset["id"], float(source_start), slot)
-        overlay = (previous_shots.get(line["id"]) or {}).get("overlay")
+        prior_shot = previous_shots.get(line["id"])
+        overlay = prior_shot.get("overlay") if prior_shot else None
         shots.append(_shot(index, line, asset, mode, source_start, bool(prior), overlay))
     return {
         "shots": shots,
@@ -153,7 +161,7 @@ def build_shotlist(
 
 
 def _usable_assignment(
-    assignment: dict[str, str], line_ids: set[str], by_id: dict[str, dict]
+    assignment: dict[str, str], line_ids: set[str], by_id: dict[str, AssetRecord]
 ) -> dict[str, str]:
     """Keep only the assignments that name a real line and a real asset."""
     return {
@@ -161,22 +169,27 @@ def _usable_assignment(
     }
 
 
-def apply_edits(shotlist: dict, lines: list[dict], assets: list[dict], edits: list[dict]) -> dict:
+def apply_edits(
+    shotlist: Shotlist,
+    lines: list[TimelineLine],
+    assets: list[AssetRecord],
+    edits: list[dict[str, Any]],
+) -> Shotlist:
     """Merge storyboard edits (asset, overlay, locked) into an existing shotlist.
 
     A shot whose asset did not change keeps the window it had, so editing overlay text or
     locking a line never moves the picture. Changing the asset picks a fresh window that
     avoids footage the other shots already use.
     """
-    by_asset = {asset["id"]: asset for asset in assets}
+    by_asset: dict[str, AssetRecord] = {asset["id"]: asset for asset in assets}
     lines_by_id = {line["id"]: line for line in lines}
-    requested: dict[str, dict] = {}
+    requested: dict[str, dict[str, Any]] = {}
     for edit in edits:
         line_id = edit.get("line")
-        if line_id not in lines_by_id:
+        if not isinstance(line_id, str) or line_id not in lines_by_id:
             raise ValueError(f"unknown script line '{line_id}'")
         asset_id = edit.get("asset")
-        if asset_id is not None and asset_id not in by_asset:
+        if asset_id is not None and (not isinstance(asset_id, str) or asset_id not in by_asset):
             raise ValueError(f"unknown asset '{asset_id}'")
         requested[line_id] = edit
     previous = {shot["line"]: shot for shot in shotlist.get("shots", [])}
@@ -187,17 +200,22 @@ def apply_edits(shotlist: dict, lines: list[dict], assets: list[dict], edits: li
         start = shot.get("source_start")
         if start is not None and line_id in lines_by_id:
             _remember(used, shot["asset"], float(start), _slot(lines_by_id[line_id]))
-    shots: list[dict] = []
+    shots: list[Shot] = []
     for index, line in enumerate(lines, start=1):
         slot = _slot(line)
         prior = previous.get(line["id"])
         edit = requested.get(line["id"], {})
-        asset_id = edit.get("asset") or (prior or {}).get("asset")
-        asset = by_asset.get(asset_id)
+        prior_asset = prior.get("asset") if prior else None
+        asset_id = edit.get("asset") or prior_asset
+        asset = by_asset.get(asset_id) if isinstance(asset_id, str) else None
         if asset is None:
             continue
-        overlay = edit.get("overlay", (prior or {}).get("overlay"))
-        locked = bool(edit.get("locked", (prior or {}).get("locked", False)))
+        overlay = (
+            edit["overlay"] if "overlay" in edit else (prior.get("overlay") if prior else None)
+        )
+        locked = bool(
+            edit["locked"] if "locked" in edit else (prior.get("locked") if prior else False)
+        )
         if asset.get("kind") != "clip":
             mode, source_start = MODE_PHOTO, None
         elif prior is not None and _window_holds(prior, asset, slot):
@@ -212,13 +230,13 @@ def apply_edits(shotlist: dict, lines: list[dict], assets: list[dict], edits: li
 
 def _shot(
     index: int,
-    line: dict,
-    asset: dict,
+    line: TimelineLine,
+    asset: AssetRecord,
     mode: str,
     source_start: float | None,
     locked: bool,
     overlay: str | None = None,
-) -> dict:
+) -> Shot:
     return {
         "id": f"S{index}",
         "line": line["id"],
@@ -232,7 +250,7 @@ def _shot(
     }
 
 
-def _scenes(asset: dict) -> list[dict]:
+def _scenes(asset: AssetRecord) -> list[Scene]:
     scenes = [
         scene
         for scene in (asset.get("scenes") or [])
@@ -244,7 +262,7 @@ def _scenes(asset: dict) -> list[dict]:
     return [{"start": 0.0, "end": round(duration, 3)}] if duration > 0 else []
 
 
-def _rotation(assets: list[dict]) -> list[dict]:
+def _rotation(assets: list[AssetRecord]) -> list[AssetRecord]:
     """Asset order for the rotation: user order, rotated so the hero leads."""
     pool = [asset for asset in assets if asset.get("id")]
     if not pool:
@@ -253,11 +271,11 @@ def _rotation(assets: list[dict]) -> list[dict]:
     return pool[lead:] + pool[:lead]
 
 
-def _slot(line: dict) -> float:
+def _slot(line: TimelineLine) -> float:
     return max(MIN_SLOT_SECONDS, round(float(line["end"]) - float(line["start"]), 3))
 
 
-def _window_holds(shot: dict, asset: dict, slot: float) -> bool:
+def _window_holds(shot: Shot, asset: AssetRecord, slot: float) -> bool:
     """Whether a recorded window is still valid for the current slot length."""
     if shot.get("asset") != asset.get("id"):
         return False
@@ -291,12 +309,12 @@ def _overlaps(start: float, slot: float, taken: list[tuple[float, float]]) -> in
 class _Cursor:
     """Round-robin over the rotation that refuses to repeat the previous asset."""
 
-    def __init__(self, pool: list[dict]) -> None:
+    def __init__(self, pool: list[AssetRecord]) -> None:
         self._pool = pool
         self._index = 0
         self._last: str | None = None
 
-    def take(self) -> dict:
+    def take(self) -> AssetRecord:
         choice = self._pool[self._index % len(self._pool)]
         if len(self._pool) > 1 and choice["id"] == self._last:
             self._index += 1

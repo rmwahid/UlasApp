@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import BinaryIO
 
 from app.core import media
+from app.core.media import MediaInfo
+from app.services.state import AssetRecord
 
 PHOTO = "photo"
 CLIP = "clip"
@@ -91,7 +93,7 @@ def save_upload(source: BinaryIO, target: Path, limit: int) -> int:
     return written
 
 
-def inspect(kind: str, path: Path) -> dict:
+def inspect(kind: str, path: Path) -> MediaInfo:
     """Probe a stored upload and reject material the pipeline cannot use."""
     try:
         info = media.probe(path)
@@ -108,8 +110,8 @@ def inspect(kind: str, path: Path) -> dict:
 
 
 def build_record(
-    index: int, kind: str, filename: str, extension: str, info: dict, size: int
-) -> dict:
+    index: int, kind: str, filename: str, extension: str, info: MediaInfo, size: int
+) -> AssetRecord:
     """One entry of `inputs.assets`: what the user gave plus what the probe measured."""
     return {
         "id": asset_id(index),

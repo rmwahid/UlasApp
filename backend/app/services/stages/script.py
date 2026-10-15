@@ -5,6 +5,8 @@ from app.services.beats import DEFAULT_SHAPE, resolve_beats, shape_rules
 from app.services.llm_json import LLMOutputError, extract_json_object
 from app.services.state import (
     SCRIPT_FILE,
+    ScriptLine,
+    StageContext,
     StageError,
     compute_spine,
     script_fingerprint,
@@ -85,7 +87,7 @@ def build_prompt(
     )
 
 
-def parse_script(raw: str, beats: list[str] | None = None) -> list[dict]:
+def parse_script(raw: str, beats: list[str] | None = None) -> list[ScriptLine]:
     order = list(beats) if beats else resolve_beats(DEFAULT_SHAPE)
     try:
         data = extract_json_object(raw)
@@ -94,7 +96,7 @@ def parse_script(raw: str, beats: list[str] | None = None) -> list[dict]:
     raw_lines = data.get("lines")
     if not isinstance(raw_lines, list) or len(raw_lines) < 3:
         raise StageError("LLM script must contain at least 3 lines.")
-    parsed: list[dict] = []
+    parsed: list[ScriptLine] = []
     for index, item in enumerate(raw_lines):
         section = str(item.get("section", "")).lower()
         say = str(item.get("say", "")).strip()
@@ -120,7 +122,7 @@ def parse_script(raw: str, beats: list[str] | None = None) -> list[dict]:
     return parsed
 
 
-def apply_shape(lines: list[dict], beats: list[str]) -> list[dict]:
+def apply_shape(lines: list[ScriptLine], beats: list[str]) -> list[ScriptLine]:
     """Give the lines the shape's order, because the prompt asks for one line per beat.
 
     The model's own labels are advisory: a line that arrives with the wrong beat name, or an extra
@@ -135,20 +137,24 @@ def apply_shape(lines: list[dict], beats: list[str]) -> list[dict]:
     return shaped
 
 
-async def run(ctx: dict) -> None:
+async def run(ctx: StageContext) -> None:
     from app.core.config import get_settings
 
     settings = get_settings()
     state = ctx["state"]
-    product = state["inputs"].get("product", {})
-    brief = state.get("brief") or {}
-    style = state.get("style") or {}
-    beats = resolve_beats(style.get("shape") or DEFAULT_SHAPE, style.get("beats"))
+    inputs = state["inputs"]
+    product = inputs.get("product")
+    brief = state.get("brief")
+    style = state.get("style")
+    beats = resolve_beats(
+        (style.get("shape") if style else None) or DEFAULT_SHAPE,
+        style.get("beats") if style else None,
+    )
     prompt = build_prompt(
-        name=product.get("name") or ctx.get("title", "the product"),
-        points=product.get("points") or "",
-        direction=brief.get("direction") or "",
-        overlay_style=brief.get("overlay_style") or "",
+        name=(product.get("name") if product else None) or ctx.get("title", "the product"),
+        points=(product.get("points") if product else None) or "",
+        direction=(brief.get("direction") if brief else None) or "",
+        overlay_style=(brief.get("overlay_style") if brief else None) or "",
         beats=beats,
     )
     raw = await llm.complete(SYSTEM_PROMPT, prompt)

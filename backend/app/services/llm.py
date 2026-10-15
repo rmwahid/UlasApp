@@ -21,7 +21,7 @@ class LLMError(RuntimeError):
     """Raised when the LLM is not configured or the request fails."""
 
 
-def read_message(body: dict) -> str:
+def read_message(body: dict[str, Any]) -> str:
     """The visible answer of a chat completion, with a useful error when it is empty.
 
     A reasoning model spends tokens in its own channel before writing anything visible, so a tight
@@ -49,7 +49,7 @@ def _endpoint() -> tuple[str, str, str]:
     )
 
 
-async def _post(payload: dict, api_key: str, timeout: int) -> str:
+async def _post(payload: dict[str, Any], api_key: str, timeout: int) -> str:
     url, _, _ = _endpoint()
     headers = {"Authorization": f"Bearer {api_key}"}
     try:
@@ -85,7 +85,7 @@ async def complete_with_images(
     channel before it writes anything, and the caller then stores nothing at all.
     """
     _, model, api_key = _endpoint()
-    parts: list[dict] = [{"type": "text", "text": user}]
+    parts: list[dict[str, Any]] = [{"type": "text", "text": user}]
     for image in images:
         encoded = base64.b64encode(image.read_bytes()).decode()
         parts.append(

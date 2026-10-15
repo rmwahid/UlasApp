@@ -6,10 +6,10 @@ from pathlib import Path
 from app.core import media
 from app.core.config import get_settings
 from app.services import matching, shotlist
-from app.services.state import SHOTLIST_FILE, StageError, write_json
+from app.services.state import SHOTLIST_FILE, AssetRecord, StageContext, StageError, write_json
 
 
-async def _index_asset(directory: Path, asset: dict, threshold: float) -> None:
+async def _index_asset(directory: Path, asset: AssetRecord, threshold: float) -> None:
     """Fill an asset's scene list from a real pass over the stored file."""
     if asset.get("kind") != "clip":
         asset["scenes"] = []
@@ -24,12 +24,14 @@ async def _index_asset(directory: Path, asset: dict, threshold: float) -> None:
         raise StageError(f"Could not read a usable length out of {asset['name']}.")
 
 
-async def run(ctx: dict) -> None:
+async def run(ctx: StageContext) -> None:
     settings = get_settings()
     state = ctx["state"]
     directory = Path(ctx["dir"])
-    lines = (state.get("timeline") or {}).get("lines") or []
-    assets = state["inputs"].get("assets") or []
+    timeline = state.get("timeline")
+    lines = timeline.get("lines") if timeline else None
+    inputs = state["inputs"]
+    assets: list[AssetRecord] = inputs.get("assets") or []
     if not lines:
         raise StageError("Timeline has no lines; run the script stage first.")
     if not assets:

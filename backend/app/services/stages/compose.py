@@ -12,7 +12,14 @@ from app.core import media
 from app.core.config import get_settings
 from app.services import tones
 from app.services.shotlist import MODE_FREEZE, MODE_PHOTO
-from app.services.state import StageError, version_path
+from app.services.state import (
+    AssetRecord,
+    Shot,
+    StageContext,
+    StageError,
+    Timeline,
+    version_path,
+)
 
 FRAME_MARGIN_SECONDS = 0.2
 RENDER_WIDTH = 1080
@@ -78,16 +85,19 @@ TEMPLATE = """<!doctype html>
 """
 
 
-def _asset_src(asset: dict) -> str:
+def _asset_src(asset: AssetRecord) -> str:
     return "assets/" + Path(asset["path"]).name
 
 
-def _is_photo(shot: dict, asset: dict) -> bool:
+def _is_photo(shot: Shot, asset: AssetRecord) -> bool:
     return shot.get("mode") == MODE_PHOTO and asset.get("kind") == "photo"
 
 
 def _media_layers(
-    shots: list[dict], assets: dict[str, dict], freeze_src: dict[str, str], tokens: dict
+    shots: list[Shot],
+    assets: dict[str, AssetRecord],
+    freeze_src: dict[str, str],
+    tokens: dict[str, str],
 ) -> tuple[list[str], list[str]]:
     """One full-bleed element per shot, plus the slow-zoom tweens for photo shots.
 
@@ -150,7 +160,7 @@ def _media_layers(
 
 
 def _card_clips(
-    timeline: dict, overlays: dict[str, str], tokens: dict
+    timeline: Timeline, overlays: dict[str, str | None], tokens: dict[str, str]
 ) -> tuple[list[str], list[str]]:
     """One card per script line, treated by its position: the opening and closing beat differ.
 
@@ -189,7 +199,7 @@ def _card_clips(
 
 
 def _freeze_clips(
-    directory: Path, media_dir: Path, shots: list[dict], assets: dict[str, dict]
+    directory: Path, media_dir: Path, shots: list[Shot], assets: dict[str, AssetRecord]
 ) -> tuple[dict[str, str], list[tuple[Path, Path, float, float]]]:
     """Padded clips for shots that are shorter than their slot: play, then hold the last frame.
 
@@ -272,17 +282,19 @@ def render_video(compose_dir: Path, out_path: Path, quality: str, runner: str) -
         raise StageError(f"Render failed. CLI output: {tail}")
 
 
-async def run(ctx: dict) -> None:
+async def run(ctx: StageContext) -> None:
     settings = get_settings()
     directory = Path(ctx["dir"])
     state = ctx["state"]
-    timeline = state.get("timeline") or {}
-    shots = (state.get("shotlist") or {}).get("shots") or []
-    if not timeline.get("lines"):
+    timeline = state.get("timeline")
+    shotlist = state.get("shotlist")
+    shots = shotlist.get("shots") if shotlist else None
+    if timeline is None or not timeline.get("lines"):
         raise StageError("Timeline has no lines; run the script stage first.")
     if not shots:
         raise StageError("No shots were planned; run the visual stage first.")
-    assets = {asset["id"]: asset for asset in state["inputs"].get("assets") or []}
+    inputs = state["inputs"]
+    assets: dict[str, AssetRecord] = {asset["id"]: asset for asset in (inputs.get("assets") or [])}
     tokens = tones.resolve(state.get("style"))
 
     compose_dir = directory / "compose"
@@ -299,7 +311,7 @@ async def run(ctx: dict) -> None:
             raise StageError(f"Material file is missing: {asset['name']}")
         shutil.copyfile(source, assets_dir / Path(asset["path"]).name)
 
-    music_rel = state["inputs"].get("music")
+    music_rel = inputs.get("music")
     music_src = ""
     if music_rel:
         music_src = "assets/" + Path(music_rel).name
@@ -379,7 +391,7 @@ async def run(ctx: dict) -> None:
     state["outputs"]["video"] = relative
 
 
-def _version_summary(shots: list[dict]) -> str:
+def _version_summary(shots: list[Shot]) -> str:
     """What this render looks like at a glance, for the result list."""
     assets = sorted({shot["asset"] for shot in shots})
     modes = {shot["mode"] for shot in shots}
