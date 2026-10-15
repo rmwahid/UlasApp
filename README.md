@@ -159,4 +159,5 @@ with the first public release.
 
 ## License
 
-A license will be added before the first public release.
+MIT. See [LICENSE](LICENSE). Third-party material, if any is ever bundled, is recorded in
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).

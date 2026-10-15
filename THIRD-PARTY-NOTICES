@@ -1,0 +1,19 @@
+# Third-party notices
+
+This file records the legal notices for third-party material that is distributed AS PART OF this
+repository. It is not a list of dependencies.
+
+Nothing third-party is bundled in this repository today: the code here is original work, and the
+test material, research notes and reference copies used during development live outside the
+repository on purpose.
+
+Components that are USED but not distributed here, and therefore stay under their own licenses:
+
+- The HyperFrames CLI, invoked at render time through npx or bunx. It is installed by the user, not
+  shipped in this repository, and its own license and NOTICE apply to it.
+- The Python dependencies pinned in `backend/uv.lock` and the JavaScript dependencies in
+  `frontend/package.json`. Each is installed by the user and keeps its own license.
+
+If third-party code, sample text, fonts, images, audio or registry blocks are ever added to this
+repository, their copyright and permission notices are recorded here at the same time, as the license
+requires. No history or provenance narrative belongs in this file.
