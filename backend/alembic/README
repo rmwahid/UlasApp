@@ -1,0 +1,11 @@
+Alembic migrations for the engine database.
+
+Generate a new revision with the venv alembic and a reviewer-friendly message:
+
+    .venv/Scripts/python.exe -m alembic revision --autogenerate -m "what changed"
+
+Apply everything (the app does this on startup too):
+
+    .venv/Scripts/python.exe -m alembic upgrade head
+
+The database URL comes from the engine settings; set ULASAPP_DATABASE_URL to target another file.
