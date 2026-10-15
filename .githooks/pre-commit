@@ -1,0 +1,36 @@
+#!/bin/sh
+# Checks a commit has to pass before it lands. Enable once per clone:
+#
+#   git config core.hooksPath .githooks
+#
+# Nothing here needs a Python package beyond the project's own venv. Skip in an emergency with
+# `git commit --no-verify`, and expect the same checks in review afterwards.
+set -e
+
+root="$(git rev-parse --show-toplevel)"
+backend="$root/backend"
+frontend="$root/frontend"
+
+if [ -x "$backend/.venv/Scripts/python.exe" ]; then
+  py="$backend/.venv/Scripts/python.exe"
+  ruff="$backend/.venv/Scripts/ruff.exe"
+else
+  py="$backend/.venv/bin/python"
+  ruff="$backend/.venv/bin/ruff"
+fi
+
+echo "[hook] ruff check"
+"$ruff" check "$backend/app" "$backend/tests"
+
+echo "[hook] ruff format --check"
+"$ruff" format --check "$backend/app" "$backend/tests"
+
+echo "[hook] pytest"
+(cd "$backend" && "$py" -m pytest -q)
+
+if command -v bun >/dev/null 2>&1 && [ -d "$frontend/node_modules" ]; then
+  echo "[hook] frontend build"
+  (cd "$frontend" && bun run build >/dev/null)
+fi
+
+echo "[hook] all checks passed"
