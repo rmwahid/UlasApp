@@ -15,10 +15,21 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "ruff>=0.6.0",
+    # The lock file, the migrations and the type checker are development tools: they are pinned with
+    # everything else so a fresh clone reproduces the same toolchain.
+    "alembic>=1.13",
+    "mypy>=1.11",
+    "uv>=0.5",
 ]
 
 [tool.uv]
 package = false
+
+[tool.mypy]
+strict = true
+files = ["app"]
+warn_unused_ignores = true
+python_version = "3.12"
 
 [tool.ruff]
 line-length = 100
